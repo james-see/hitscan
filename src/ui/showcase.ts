@@ -1,6 +1,7 @@
 import type { DamageFeedback } from './widgets/DamageFeedback.ts';
 import type { Hitmarker } from './widgets/Hitmarker.ts';
 import type { Killfeed } from './widgets/Killfeed.ts';
+import type { MatchHud } from './widgets/MatchHud.ts';
 import type { Notices } from './widgets/Notices.ts';
 import type { HudState } from './state.ts';
 import { setMotionFrozen } from './motion.ts';
@@ -23,6 +24,7 @@ export interface ShowcaseWidgets {
   damage: DamageFeedback;
   killfeed: Killfeed;
   notices: Notices;
+  matchHud: MatchHud;
   setGhost(fraction: number): void;
 }
 
@@ -53,6 +55,14 @@ export function applyShowcase(w: ShowcaseWidgets): void {
   // Depict the moment just after a burst landed: the trailing bar has not
   // caught up with the real health value yet.
   w.setGhost(0.68);
+
+  // A round in progress and close, which is the state the scoreline has to be
+  // legible in. Captures never start a match, so this is the only way the
+  // strip appears in a still.
+  w.matchHud.setMode('FREE-FOR-ALL');
+  w.matchHud.setScores(19, 22);
+  w.matchHud.setClock(163);
+  w.matchHud.setVisible(true);
 
   for (const entry of [
     { killer: 'RAVEN-02', victim: 'HOSTILE 07', headshot: false },

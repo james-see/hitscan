@@ -67,6 +67,8 @@
 #hud .ammo,
 #hud .killfeed,
 #hud .compass,
+#hud .match,
+#hud .death,
 #hud .notices {
   contain: layout style;
 }
@@ -155,6 +157,17 @@
 /* Sprinting cannot be aimed from, so the reticle recedes rather than lying. */
 #hud .ch.is-sprinting {
   --sprint-fade: 0.32;
+}
+
+/*
+ * A dead player has no weapon on screen and nothing to aim, so the reticle and
+ * the magazine both go with the viewmodel. Left up, they sit over a corpse's
+ * view of the floor and imply the player can still shoot.
+ */
+#hud.is-dead .ch,
+#hud.is-dead .ammo {
+  opacity: 0;
+  transition: opacity 200ms var(--ease-out);
 }
 
 #hud .ch.is-firing .ch-tick {
@@ -428,6 +441,7 @@
  * axis, where the content width varies per widget.
  */
 #hud .compass-scrim,
+#hud .match-scrim,
 #hud .vitals::before,
 #hud .ammo::before {
   --scrim-fade: 12%;
@@ -916,6 +930,18 @@
     inset 0 0 0 1px rgba(255, 255, 255, 0.05),
     inset calc(var(--u) * 0.25) 0 0 var(--accent);
 }
+/* The player's own death. Same geometry, danger bar, so "that was me dying"
+   and "that was me killing" are distinguishable without reading the names. */
+#hud .kf-row.is-death {
+  background: rgba(32, 10, 8, 0.66);
+  box-shadow:
+    var(--shadow-box),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.05),
+    inset calc(var(--u) * 0.25) 0 0 var(--danger);
+}
+#hud .kf-row.is-death .kf-victim {
+  color: #ffb9ae;
+}
 #hud .kf-row.is-out {
   animation: kf-out 260ms var(--ease-in) forwards;
 }
@@ -1364,4 +1390,446 @@
 #hud .btn:focus-visible {
   outline: 1px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* ── match: score and clock (top centre, under the compass) ─────────────── */
+
+/*
+ * Stacked below the compass on the same axis rather than beside it. The
+ * compass occupies 4.5u from the safe inset, so 6.5u clears it with the same
+ * 2u rhythm the corner widgets use between their own rows.
+ */
+#hud .match {
+  position: absolute;
+  top: calc(var(--safe) + var(--u) * 6.5);
+  left: 50%;
+  transform: translateX(-50%);
+  display: grid;
+  grid-template-columns: calc(var(--u) * 12) calc(var(--u) * 18) calc(var(--u) * 12);
+  align-items: start;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 180ms var(--ease-out),
+    visibility 0s linear 180ms;
+}
+#hud .match.is-on {
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity 180ms var(--ease-out),
+    visibility 0s;
+}
+
+#hud .match-scrim {
+  --scrim-fade: 14%;
+  inset: calc(var(--u) * -1.75) calc(var(--u) * -3);
+}
+
+#hud .match-side,
+#hud .match-middle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--u) * 0.5);
+}
+
+#hud .match-score {
+  display: flex;
+  font-size: var(--fs-lg);
+  line-height: 0.82;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+  text-shadow: var(--shadow-text);
+}
+/* The player's own score carries the accent, matching the killfeed's rule for
+   which rows are theirs. */
+#hud .match-score.is-mine {
+  color: var(--accent);
+}
+
+#hud .match-clock {
+  font-size: var(--fs-lg);
+  line-height: 0.82;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+  text-shadow: var(--shadow-text);
+  font-variant-numeric: tabular-nums;
+  transition: color 200ms linear;
+}
+#hud .match-clock.is-urgent {
+  color: var(--danger);
+  animation: match-urgent 1000ms ease-in-out infinite;
+}
+@keyframes match-urgent {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* Tighter tracking than a standard label: the mode name is the longest string
+   on the strip and has to fit the centre column without wrapping. */
+#hud .match-mode {
+  font-size: var(--fs-micro);
+  letter-spacing: 0.16em;
+  text-indent: 0.16em;
+  white-space: nowrap;
+}
+
+/* ── death notice ───────────────────────────────────────────────────────── */
+
+#hud .death {
+  position: absolute;
+  left: 50%;
+  top: 34%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--u) * 0.75);
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 220ms var(--ease-out),
+    visibility 0s linear 220ms;
+}
+#hud .death.is-on {
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity 380ms var(--ease-out) 260ms,
+    visibility 0s;
+}
+
+/*
+ * A heavier backing than the corner widgets get, and deliberately so: the death
+ * camera ends up looking at whatever the corpse happens to face, and the blood
+ * vignette is at its strongest at exactly this moment, so small red type over a
+ * sunlit floor washed red has nothing left to separate it from the background.
+ */
+#hud .death::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: calc(var(--u) * -2) calc(var(--u) * -6);
+  background: radial-gradient(
+    ellipse 60% 50% at 50% 50%,
+    rgba(3, 5, 8, 0.86) 0%,
+    rgba(3, 5, 8, 0.62) 55%,
+    rgba(3, 5, 8, 0) 100%
+  );
+}
+
+/* Neutral rather than red: the vignette owns red at this moment, and a red
+   caption on top of it stops being a caption. */
+#hud .death-label {
+  color: var(--ink-2);
+}
+#hud .death-killer {
+  font-size: var(--fs-lg);
+  line-height: 1;
+  letter-spacing: 0.14em;
+  text-indent: 0.14em;
+  color: #ffc4bb;
+  text-shadow: var(--shadow-text);
+}
+#hud .death-respawn {
+  font-size: var(--fs-xs);
+  letter-spacing: 0.24em;
+  text-indent: 0.24em;
+  color: var(--ink);
+  text-shadow: var(--shadow-text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── score table (shared by the scoreboard and the results screen) ──────── */
+
+#hud .stable {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+#hud .stable-row {
+  display: grid;
+  grid-template-columns: calc(var(--u) * 4) 1fr calc(var(--u) * 8) calc(var(--u) * 8);
+  align-items: center;
+  gap: calc(var(--u) * 1.5);
+  padding: calc(var(--u) * 0.875) calc(var(--u) * 1.5);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.12em;
+  line-height: 1;
+  color: var(--ink-2);
+}
+#hud .stable-head {
+  color: var(--ink-3);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.22em;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+  padding-bottom: calc(var(--u) * 1);
+}
+/* Zebra at very low contrast: enough to track a row across four columns
+   without turning the table into a pattern. */
+#hud .stable-body .stable-row:nth-child(even) {
+  background: rgba(255, 255, 255, 0.028);
+}
+#hud .stable-row.is-player {
+  color: var(--ink);
+  background: rgba(28, 17, 6, 0.62);
+  box-shadow: inset calc(var(--u) * 0.25) 0 0 var(--accent);
+}
+#hud .stable-row.is-player .stable-name {
+  color: var(--accent);
+}
+#hud .stable-rank {
+  color: var(--ink-3);
+  text-align: right;
+}
+#hud .stable-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#hud .stable-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── scoreboard (hold Tab) ──────────────────────────────────────────────── */
+
+#hud .scorebd {
+  position: absolute;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-ui);
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 120ms var(--ease-out),
+    visibility 0s linear 120ms;
+}
+#hud .scorebd.is-open {
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity 120ms var(--ease-out),
+    visibility 0s;
+}
+
+#hud .scorebd-panel {
+  width: min(calc(var(--u) * 90), 78vw);
+  padding: calc(var(--u) * 2.5) calc(var(--u) * 2.5) calc(var(--u) * 2);
+  /* Opaque enough to read against a bright yard, and no blur: this is held
+     down while the player is still standing in the fight. */
+  background: linear-gradient(180deg, rgba(9, 13, 19, 0.9), rgba(6, 9, 13, 0.92));
+  box-shadow:
+    0 calc(var(--u) * 2) calc(var(--u) * 6) rgba(0, 0, 0, 0.55),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+  transform: translateY(calc(var(--u) * -1));
+}
+
+#hud .scorebd-head {
+  display: flex;
+  align-items: baseline;
+  gap: calc(var(--u) * 2);
+  padding: 0 calc(var(--u) * 1.5) calc(var(--u) * 1.75);
+}
+#hud .scorebd-title {
+  font-family: var(--font-display);
+  font-size: var(--fs-md);
+  letter-spacing: 0.28em;
+  text-indent: 0.28em;
+  color: var(--ink);
+}
+#hud .scorebd-meta {
+  display: flex;
+  align-items: baseline;
+  gap: calc(var(--u) * 2);
+  margin-left: auto;
+}
+#hud .scorebd-clock {
+  font-family: var(--font-display);
+  font-size: var(--fs-md);
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── lobby and results screens ──────────────────────────────────────────── */
+
+/*
+ * Same surface as the pause menu, deliberately: scrim, blur, flat panel,
+ * accent hairline. These are the moments the arena is not being played, and
+ * they should all look like the same kind of moment.
+ */
+#hud .mscreen {
+  position: absolute;
+  inset: 0;
+  z-index: 94;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(4, 6, 10, 0.72);
+  backdrop-filter: blur(14px) saturate(0.72);
+  -webkit-backdrop-filter: blur(14px) saturate(0.72);
+  font-family: var(--font-ui);
+  cursor: default;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity 200ms var(--ease-out),
+    visibility 0s linear 200ms;
+}
+#hud .mscreen.is-open {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition:
+    opacity 200ms var(--ease-out),
+    visibility 0s;
+}
+
+#hud .mscreen-panel {
+  display: none;
+  position: relative;
+  flex-direction: column;
+  align-items: center;
+  width: min(calc(var(--u) * 78), 88vw);
+  max-height: 88vh;
+  padding: calc(var(--u) * 4) calc(var(--u) * 4) calc(var(--u) * 3.5);
+  background: linear-gradient(180deg, rgba(15, 20, 27, 0.96), rgba(9, 12, 17, 0.97));
+  box-shadow:
+    0 calc(var(--u) * 4) calc(var(--u) * 10) rgba(0, 0, 0, 0.6),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+  transform: translateY(calc(var(--u) * 1.5)) scale(0.994);
+  transition: transform 220ms var(--ease-out);
+}
+#hud .mscreen.is-open .mscreen-panel {
+  transform: none;
+}
+#hud .mscreen-panel::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent), rgba(255, 157, 46, 0));
+}
+#hud .mscreen.is-pregame .mscreen-panel--pregame,
+#hud .mscreen.is-results .mscreen-panel--results {
+  display: flex;
+}
+
+#hud .mscreen-title {
+  font-family: var(--font-display);
+  font-size: var(--fs-xxl);
+  line-height: 1;
+  letter-spacing: 0.34em;
+  text-indent: 0.34em;
+  color: var(--ink);
+  text-shadow: 0 0 calc(var(--u) * 5) rgba(255, 157, 46, 0.28);
+}
+#hud .mscreen-mode {
+  font-family: var(--font-display);
+  font-size: var(--fs-sm);
+  letter-spacing: 0.32em;
+  text-indent: 0.32em;
+  color: var(--accent);
+  margin-top: calc(var(--u) * 1);
+}
+
+#hud .mscreen-rules {
+  display: flex;
+  gap: calc(var(--u) * 1);
+  margin: calc(var(--u) * 3.5) 0;
+}
+#hud .mscreen-rule {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--u) * 0.875);
+  min-width: calc(var(--u) * 16);
+  padding: calc(var(--u) * 1.5) calc(var(--u) * 1);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+}
+#hud .mscreen-rule-value {
+  font-family: var(--font-display);
+  font-size: var(--fs-md);
+  line-height: 1;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+#hud .mscreen-cta {
+  padding: calc(var(--u) * 1.75) calc(var(--u) * 6);
+  font-size: var(--fs-sm);
+}
+#hud .mscreen-hint {
+  margin-top: calc(var(--u) * 2.5);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
+  text-align: center;
+}
+
+#hud .mscreen-outcome {
+  font-family: var(--font-display);
+  font-size: var(--fs-xxl);
+  line-height: 1;
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  color: var(--ink);
+}
+#hud .mscreen-outcome.is-victory {
+  color: var(--accent);
+  text-shadow: 0 0 calc(var(--u) * 5) rgba(255, 157, 46, 0.34);
+}
+#hud .mscreen-outcome.is-defeat {
+  color: var(--danger);
+  text-shadow: 0 0 calc(var(--u) * 5) rgba(255, 75, 58, 0.28);
+}
+
+#hud .mscreen-final {
+  display: flex;
+  align-items: baseline;
+  gap: calc(var(--u) * 1.75);
+  margin-top: calc(var(--u) * 1.25);
+  font-family: var(--font-display);
+  font-size: var(--fs-lg);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+#hud .mscreen-final-mine {
+  color: var(--accent);
+}
+#hud .mscreen-final-sep {
+  color: var(--ink-3);
+}
+#hud .mscreen-final-theirs {
+  color: var(--ink);
+}
+#hud .mscreen-reason {
+  margin-top: calc(var(--u) * 1.25);
+  margin-bottom: calc(var(--u) * 3);
+}
+
+#hud .mscreen-panel--results .stable {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+#hud .mscreen-actions {
+  display: flex;
+  gap: calc(var(--u) * 1.5);
+  margin-top: calc(var(--u) * 3.5);
 }

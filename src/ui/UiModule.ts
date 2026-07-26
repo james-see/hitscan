@@ -1,18 +1,33 @@
 import type { EngineContext, GameModule } from '@/types/engine.ts';
 import type { Unsubscribe } from '@/types/events.ts';
+import type { MatchPhase, MatchSnapshot, ScoreRow } from '@/match/rules.ts';
 import { HudState, spreadToPixels } from './state.ts';
 import { loadPrefs, savePrefs, type UiPrefs } from './prefs.ts';
 import { applyShowcase } from './showcase.ts';
+import { actorName } from './names.ts';
 import { AmmoCounter } from './widgets/AmmoCounter.ts';
 import { Compass } from './widgets/Compass.ts';
 import { Crosshair } from './widgets/Crosshair.ts';
 import { DamageFeedback } from './widgets/DamageFeedback.ts';
+import { DeathNotice } from './widgets/DeathNotice.ts';
 import { Hitmarker } from './widgets/Hitmarker.ts';
 import { Killfeed } from './widgets/Killfeed.ts';
+import { MatchHud } from './widgets/MatchHud.ts';
+import { MatchScreens } from './widgets/MatchScreens.ts';
 import { Notices } from './widgets/Notices.ts';
+import { Scoreboard } from './widgets/Scoreboard.ts';
 import { SettingsMenu } from './widgets/SettingsMenu.ts';
 import { Vitals } from './widgets/Vitals.ts';
 import './hud.css';
+
+/** The slice of the match module the HUD reads and drives. Duck-typed. */
+interface MatchLike {
+  readonly snapshot: MatchSnapshot;
+  readonly rosterSize: number;
+  rows(): ScoreRow[];
+  requestStart(): void;
+  returnToLobby(): void;
+}
 
 /** Height at which the 8px grid is exactly 8 physical pixels. */
 const REFERENCE_HEIGHT = 1080;
@@ -47,7 +62,17 @@ export class UiModule implements GameModule {
   #killfeed!: Killfeed;
   #notices!: Notices;
   #vitals!: Vitals;
+  #matchHud!: MatchHud;
   #settings: SettingsMenu | null = null;
+  #screens: MatchScreens | null = null;
+  #scoreboard: Scoreboard | null = null;
+  #death: DeathNotice | null = null;
+  #match: MatchLike | null = null;
+  /** Last phase the overlays were rendered for; drives the transitions. */
+  #phase: MatchPhase | null = null;
+  /** Mirrors the round's respawn window, so the reticle can go with the body. */
+  #dead = false;
+  #showcase = false;
 
   #unsubscribes: Unsubscribe[] = [];
   #feedVictims = new Map<string, number>();
@@ -65,6 +90,10 @@ export class UiModule implements GameModule {
     this.#root = host;
 
     this.#compass = new Compass(host);
+    // Mounted with the compass rather than last: the scoreline sits directly
+    // under it and both have to take the damage vignette the same way, which
+    // is decided by paint order against the vignette's own node.
+    this.#matchHud = new MatchHud(host);
     this.#killfeed = new Killfeed(host);
     this.#vitals = new Vitals(host);
     this.#ammo = new AmmoCounter(host);
@@ -73,9 +102,21 @@ export class UiModule implements GameModule {
     this.#hitmarker = new Hitmarker(host);
     this.#notices = new Notices(host);
 
+    this.#match = ctx.getModule<GameModule & MatchLike>('match') ?? null;
+
     this.#state.bind(ctx);
     this.#applyPrefs(ctx);
     this.#applyScale(ctx.viewport.height);
+
+    if (!ctx.capture) {
+      this.#death = new DeathNotice(host);
+      this.#scoreboard = new Scoreboard(host);
+      this.#screens = new MatchScreens(host, {
+        onDeploy: () => this.#deploy(ctx),
+        onPlayAgain: () => this.#deploy(ctx),
+        onLobby: () => this.#match?.returnToLobby(),
+      });
+    }
 
     if (!ctx.capture) {
       this.#settings = new SettingsMenu(host, ctx, this.#prefs, {
@@ -97,7 +138,8 @@ export class UiModule implements GameModule {
 
     this.#subscribe(ctx);
 
-    if (isShowcaseRequested(ctx)) {
+    this.#showcase = isShowcaseRequested(ctx);
+    if (this.#showcase) {
       applyShowcase({
         root: host,
         state: this.#state,
@@ -105,6 +147,7 @@ export class UiModule implements GameModule {
         damage: this.#damage,
         killfeed: this.#killfeed,
         notices: this.#notices,
+        matchHud: this.#matchHud,
         setGhost: (fraction) => this.#vitals.setGhostForShowcase(fraction),
       });
     }
@@ -140,6 +183,83 @@ export class UiModule implements GameModule {
     this.#damage.setHealth(snapshot.health, snapshot.maxHealth, regenerating);
     this.#damage.update(ctx, now);
     if (this.#prefs.showCompass) this.#compass.update(snapshot.headingDeg);
+    this.#updateMatch(ctx);
+  }
+
+  /**
+   * Round state is polled rather than mirrored from every transition.
+   *
+   * The phase is the single thing that decides which overlay is up, so reading
+   * it once a frame keeps the lobby, the results screen and the HUD from ever
+   * disagreeing about what is happening — which is exactly what a second copy
+   * of the state machine in the UI would eventually do.
+   */
+  #updateMatch(ctx: EngineContext): void {
+    const match = this.#match;
+    // A showcase still pins the whole HUD, including the scoreline, and the
+    // phase poll would immediately hide it again.
+    if (!match || this.#showcase) return;
+    const state = match.snapshot;
+
+    if (state.phase !== this.#phase) {
+      this.#phase = state.phase;
+      this.#applyPhase(state);
+    }
+
+    if (state.awaitingRespawn !== this.#dead) {
+      this.#dead = state.awaitingRespawn;
+      this.#root?.classList.toggle('is-dead', state.awaitingRespawn);
+    }
+    if (state.awaitingRespawn) this.#death?.setCountdown(state.respawnIn);
+
+    const board = this.#scoreboard;
+    if (board) {
+      // Held, not toggled, and only while there is a round to report on.
+      board.setOpen(state.phase === 'live' && ctx.input.isDown('scoreboard'));
+      board.update(state, match.rows());
+    }
+  }
+
+  #applyPhase(state: MatchSnapshot): void {
+    const match = this.#match;
+    if (!match) return;
+
+    switch (state.phase) {
+      case 'pregame':
+        this.#matchHud.setVisible(false);
+        this.#death?.hide();
+        this.#scoreboard?.setOpen(false);
+        this.#screens?.showPregame(state, match.rosterSize);
+        break;
+      case 'live':
+        this.#screens?.close();
+        this.#matchHud.setMode(state.mode);
+        this.#matchHud.setVisible(true);
+        break;
+      case 'ended':
+        this.#matchHud.setVisible(false);
+        this.#death?.hide();
+        this.#scoreboard?.setOpen(false);
+        this.#screens?.showResults(state, match.rows());
+        break;
+      case 'idle':
+      default:
+        this.#matchHud.setVisible(false);
+        this.#screens?.close();
+        break;
+    }
+  }
+
+  /**
+   * Enters a round from the lobby or the results screen.
+   *
+   * Pointer lock is requested from inside the click handler because it needs
+   * the user gesture; the round is started first so the player is already
+   * spawned and playable by the time the view is captured.
+   */
+  #deploy(ctx: EngineContext): void {
+    this.#match?.requestStart();
+    ctx.input.requestPointerLock();
   }
 
   dispose(): void {
@@ -147,6 +267,7 @@ export class UiModule implements GameModule {
     this.#unsubscribes = [];
     window.clearTimeout(this.#saveTimer);
     this.#settings?.dispose();
+    this.#screens?.dispose();
     if (this.#root) this.#root.replaceChildren();
   }
 
@@ -176,7 +297,7 @@ export class UiModule implements GameModule {
       }),
       on('ui:killfeed', (entry) => {
         this.#feedVictims.set(entry.victim, performance.now());
-        if (this.#prefs.showKillfeed) this.#killfeed.push(entry);
+        if (this.#prefs.showKillfeed) this.#pushFeed(entry.killer, entry.victim, entry.headshot);
       }),
       on('ui:notify', ({ text, durationMs }) => this.#notices.push(text, durationMs)),
 
@@ -192,11 +313,27 @@ export class UiModule implements GameModule {
         window.setTimeout(() => {
           const logged = this.#feedVictims.get(actorId) ?? -Infinity;
           if (performance.now() - logged < FEED_DEDUPE_MS) return;
-          this.#killfeed.push({ killer: killerId, victim: actorId, headshot });
+          this.#pushFeed(killerId, actorId, headshot);
         }, 0);
       }),
 
       on('player:sprint-changed', (payload) => this.#state.onSprintChanged(payload)),
+
+      // -- round ---------------------------------------------------------------
+      on('match:started', ({ mode }) => {
+        this.#matchHud.setMode(mode);
+        this.#matchHud.setScores(0, 0);
+        // A second round must not open with the first one's eliminations
+        // still ageing out of the feed.
+        this.#killfeed.clear();
+        this.#feedVictims.clear();
+      }),
+      on('match:score-changed', ({ playerScore, opponentScore }) => {
+        this.#matchHud.setScores(playerScore, opponentScore);
+      }),
+      on('match:tick', ({ remainingSeconds }) => this.#matchHud.setClock(remainingSeconds)),
+      on('player:died', ({ killerId }) => this.#death?.show(killerId)),
+      on('player:respawned', () => this.#death?.hide()),
 
       on('engine:resized', ({ height }) => this.#applyScale(height)),
       on('engine:quality-changed', () => this.#settings?.syncAll()),
@@ -206,9 +343,28 @@ export class UiModule implements GameModule {
       // second-guessing it.
       on('engine:pointer-lock', ({ locked }) => {
         if (locked) this.#settings?.close();
-        else this.#settings?.open();
+        else if (this.#settingsAllowed()) this.#settings?.open();
       })
     );
+  }
+
+  /**
+   * The lobby and the results screen are menus already; stacking the pause
+   * menu on top of one would put two overlays in front of the player and steal
+   * the buttons underneath.
+   */
+  #settingsAllowed(): boolean {
+    const phase = this.#match?.snapshot.phase;
+    return phase === undefined || phase === 'live';
+  }
+
+  /** Feed rows carry actor ids; the display name is resolved here. */
+  #pushFeed(killerId: string, victimId: string, headshot: boolean): void {
+    this.#killfeed.push({
+      killer: actorName(killerId),
+      victim: actorName(victimId),
+      headshot,
+    });
   }
 
   #applyPrefs(ctx: EngineContext): void {

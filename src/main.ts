@@ -9,6 +9,7 @@ import { WorldModule } from '@/world/WorldModule.ts';
 import { PlayerModule } from '@/player/PlayerModule.ts';
 import { WeaponModule } from '@/weapon/WeaponModule.ts';
 import { AiModule } from '@/ai/AiModule.ts';
+import { MatchModule } from '@/match/MatchModule.ts';
 import { VfxModule } from '@/vfx/VfxModule.ts';
 import { AudioModule } from '@/audio/AudioModule.ts';
 import { UiModule } from '@/ui/UiModule.ts';
@@ -40,6 +41,9 @@ const ORDER = {
   player: 0,
   weapon: 10,
   ai: 20,
+  // After the AI, so a bot death registered this step is scored on the same
+  // step it happened, and before the UI, which reads the round state.
+  match: 25,
   vfx: 30,
   audio: 40,
   ui: 50,
@@ -107,6 +111,7 @@ async function main(): Promise<void> {
     .add(new PlayerModule(ORDER.player))
     .add(new WeaponModule(ORDER.weapon))
     .add(new AiModule(ORDER.ai))
+    .add(new MatchModule(ORDER.match))
     .add(new VfxModule(ORDER.vfx))
     .add(new AudioModule(ORDER.audio))
     .add(new UiModule(ORDER.ui))
@@ -141,15 +146,11 @@ async function main(): Promise<void> {
   await nextPresentedFrame();
   bridge.markReady();
 
-  const prompt = document.getElementById('start-prompt');
-  prompt?.classList.add('visible');
-  const deploy = (): void => {
-    engine.input.requestPointerLock();
-  };
-  prompt?.addEventListener('click', deploy);
-  engine.events.on('engine:pointer-lock', ({ locked }) => {
-    prompt?.classList.toggle('visible', !locked);
-  });
+  // Nothing to wire up here any more: the match module puts the game in its
+  // lobby phase, and the HUD's deploy button owns both starting the round and
+  // asking for pointer lock. The page shell used to carry a "click to deploy"
+  // overlay that only took the pointer, which left no way to start, finish or
+  // restart an actual round.
 }
 
 main().catch(showError);

@@ -34,6 +34,9 @@ export class Killfeed {
     const isPlayer =
       entry.killer === this.#playerName || entry.killer.toLowerCase() === 'player';
     if (isPlayer) row.classList.add('is-player');
+    // The player's own death gets its own treatment. Without it a busy feed
+    // answers "was that me?" but not "was that me dying?".
+    else if (entry.victim === this.#playerName) row.classList.add('is-death');
 
     text('span', 'kf-name kf-killer', isPlayer ? this.#playerName : entry.killer, row);
 

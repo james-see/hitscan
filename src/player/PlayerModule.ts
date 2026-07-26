@@ -3,7 +3,7 @@ import type { EngineContext, GameModule } from '@/types/engine.ts';
 import type { CharacterControllerHandle } from '@/types/physics.ts';
 import type { PlayerState, SurfaceKind } from '@/types/gameplay.ts';
 import type { Unsubscribe } from '@/types/events.ts';
-import { BODY, CAMERA, MANTLE, MOVE, SLIDE } from './tuning.ts';
+import { BODY, CAMERA, DEATH, MANTLE, MOVE, SLIDE } from './tuning.ts';
 import { CameraRig, type ViewFrame } from './CameraRig.ts';
 import {
   hasStandClearance,
@@ -12,6 +12,17 @@ import {
   sampleGroundSurface,
   type LedgeTarget,
 } from './LedgeProbe.ts';
+
+/**
+ * Whether the player is playable.
+ *
+ * `dead` and `inactive` both report `alive: false` on `PlayerState`, which is
+ * the flag the bots' perception and fire control already gate on, so neither
+ * state can be shot at. They differ in what the camera does: a dead player
+ * slumps, an inactive one is simply frozen where they stand, which is what the
+ * lobby and the results screen sit behind.
+ */
+export type PlayerLifeState = 'alive' | 'dead' | 'inactive';
 
 /** Root motion currently being played. Control is locked for its duration. */
 interface MantleMotion {
@@ -70,6 +81,26 @@ export class PlayerModule implements GameModule {
   #health = 100;
   readonly #maxHealth = 100;
 
+  #life: PlayerLifeState = 'alive';
+  /**
+   * Death is raised by a damage event but committed on the next fixed step.
+   *
+   * The bot's lethal round emits `combat:player-damaged` before it emits
+   * `combat:damage-dealt`, and only the second carries the shooter. Committing
+   * inside the first handler would credit every death to the previous
+   * attacker; deferring by one step lets both events land first.
+   */
+  #pendingDeath = false;
+  #lastAttacker: string | null = null;
+  #lastAttackerHeadshot = false;
+  /** Point the view turns toward on death: back down the killing round. */
+  #deathLook = new THREE.Vector3();
+  #deathElapsed = 0;
+  #deathYaw = 0;
+  #deathPitch = 0;
+  #deathTargetYaw = 0;
+  #deathEye = 0;
+
   #mantle: MantleMotion | null = null;
   #mantleCooldown = 0;
 
@@ -95,12 +126,15 @@ export class PlayerModule implements GameModule {
   #speedScale = 1;
 
   #subscriptions: Unsubscribe[] = [];
+  /** Held for `respawn` and `setInactive`, both called from outside a hook. */
+  #ctx: EngineContext | null = null;
 
   constructor(order = 0) {
     this.order = order;
   }
 
   init(ctx: EngineContext): void {
+    this.#ctx = ctx;
     this.#controller = ctx.physics.createCharacterController(
       this.#position,
       BODY.radius,
@@ -112,14 +146,33 @@ export class PlayerModule implements GameModule {
 
     this.#subscriptions.push(
       ctx.events.on('combat:player-damaged', ({ amount, from, health }) => {
+        // A corpse cannot be hurt further, and the lobby cannot be shot into.
+        if (this.#life !== 'alive') return;
         this.#health = THREE.MathUtils.clamp(
           Number.isFinite(health) ? health : this.#health - amount,
           0,
           this.#maxHealth
         );
         this.#flinch(from, amount);
+        if (this.#health <= 0) {
+          this.#pendingDeath = true;
+          this.#deathLook.copy(from);
+        }
+      }),
+      // Only this event carries who dealt the damage, so it is what identifies
+      // the killer. Bots report no hitbox for player hits, so a player death is
+      // never a headshot today; the flag is read rather than assumed so it
+      // becomes correct the moment they do.
+      ctx.events.on('combat:damage-dealt', (info) => {
+        if (info.targetId !== 'player' || this.#life !== 'alive') return;
+        this.#lastAttacker = info.sourceId;
+        this.#lastAttackerHeadshot = info.hitbox === 'head';
+        this.#deathLook
+          .copy(info.point)
+          .addScaledVector(info.direction, -DEATH.killerBacktrack);
       }),
       ctx.events.on('combat:player-healed', ({ health }) => {
+        if (this.#life !== 'alive') return;
         if (Number.isFinite(health)) {
           this.#health = THREE.MathUtils.clamp(health, 0, this.#maxHealth);
         }
@@ -129,6 +182,12 @@ export class PlayerModule implements GameModule {
 
   fixedUpdate(dt: number, ctx: EngineContext): void {
     if (ctx.capture) return;
+
+    this.#commitDeath(ctx);
+    if (this.#life !== 'alive') {
+      this.#settleLifeless(dt);
+      return;
+    }
 
     const input = ctx.input;
     this.#mantleCooldown = Math.max(0, this.#mantleCooldown - dt);
@@ -187,12 +246,17 @@ export class PlayerModule implements GameModule {
   update(dt: number, ctx: EngineContext): void {
     if (ctx.capture) return;
 
+    if (this.#life === 'dead') {
+      this.#applyDeathCamera(dt, ctx);
+      return;
+    }
+
     const input = ctx.input;
     // Latch here as well as in the fixed step: above 120Hz a frame can render
     // without any fixed step running, and the press flag would be lost.
     if (input.wasPressed('jump')) this.#jumpLatch = true;
 
-    if (input.pointerLocked) {
+    if (this.#life === 'alive' && input.pointerLocked) {
       this.#yaw += input.look.x;
       this.#pitch = THREE.MathUtils.clamp(
         this.#pitch + input.look.y,
@@ -713,6 +777,122 @@ export class PlayerModule implements GameModule {
     this.#rig.punchDamage(_tmp.dot(_right), _tmp.dot(_forward), amount);
   }
 
+  // -- death ----------------------------------------------------------------
+
+  /**
+   * Turns a health of zero into an actual death.
+   *
+   * Runs at the top of the fixed step rather than inside the damage handler,
+   * so every event belonging to the killing round has already been delivered
+   * and the killer is known.
+   *
+   * The flag is cleared before the life check, not after: that is what stops a
+   * death raised but never committed -- because the round ended, or the player
+   * was already out of play -- from surviving into the next life and firing on
+   * the first step of the next round.
+   */
+  #commitDeath(ctx: EngineContext): void {
+    if (!this.#pendingDeath) return;
+    this.#pendingDeath = false;
+    if (this.#life !== 'alive') return;
+
+    this.#life = 'dead';
+    this.#health = 0;
+    this.#velocity.x = 0;
+    this.#velocity.z = 0;
+    this.#mantle = null;
+    this.#stepLift = 0;
+    this.#endSlide(ctx);
+    if (this.#sprinting) {
+      this.#sprinting = false;
+      ctx.events.emit('player:sprint-changed', { sprinting: false });
+    }
+
+    this.#deathElapsed = 0;
+    this.#deathYaw = this.#yaw;
+    this.#deathPitch = this.#pitch;
+    this.#deathTargetYaw = this.#yawTowardKiller();
+    this.#deathEye = this.#smoothedY;
+    // The rig's springs would fight the slump; the death camera drives the
+    // transform directly instead.
+    this.#rig.reset();
+    // Hands and weapon go with the body. The viewmodel is drawn by its own
+    // camera on a near plane, so leaving it up would float it over the corpse.
+    ctx.viewmodelScene.visible = false;
+
+    ctx.events.emit('player:died', {
+      killerId: this.#lastAttacker,
+      headshot: this.#lastAttackerHeadshot,
+    });
+  }
+
+  /** Yaw partway around toward whatever fired the killing round. */
+  #yawTowardKiller(): number {
+    const dx = this.#deathLook.x - this.#position.x;
+    const dz = this.#deathLook.z - this.#position.z;
+    if (Math.hypot(dx, dz) < 0.5) return this.#yaw;
+    // Matches `#basis`: forward is (-sin yaw, 0, -cos yaw).
+    const wanted = Math.atan2(-dx, -dz);
+    let delta = wanted - this.#yaw;
+    while (delta > Math.PI) delta -= Math.PI * 2;
+    while (delta < -Math.PI) delta += Math.PI * 2;
+    return this.#yaw + delta * DEATH.faceKiller;
+  }
+
+  /**
+   * Gravity, and nothing else, for a body that is no longer being driven.
+   *
+   * Deliberately not `#integrate`: that publishes landings and footsteps, and
+   * a corpse reaching the floor should not sound like a player doing it or
+   * give the bots something to investigate.
+   */
+  #settleLifeless(dt: number): void {
+    if (this.#grounded) {
+      this.#velocity.set(0, 0, 0);
+      return;
+    }
+    this.#velocity.x *= 1 - Math.min(1, dt * 6);
+    this.#velocity.z *= 1 - Math.min(1, dt * 6);
+    this.#velocity.y = Math.max(-MOVE.maxFallSpeed, this.#velocity.y - MOVE.gravity * dt);
+    _motion.set(this.#velocity.x * dt, this.#velocity.y * dt, this.#velocity.z * dt);
+    this.#controller.move(_motion, dt);
+    this.#grounded = this.#controller.grounded;
+    this.#controller.getPosition(this.#position);
+  }
+
+  /**
+   * Slumps to the ground, then keeps drifting.
+   *
+   * Driven per frame like every other camera effect. The drift has no end
+   * state on purpose: the respawn timer, not the animation, decides how long
+   * the player looks at it.
+   */
+  #applyDeathCamera(dt: number, ctx: EngineContext): void {
+    this.#deathElapsed += dt;
+    const fall = easeOutCubic(
+      THREE.MathUtils.clamp(this.#deathElapsed / DEATH.fallSeconds, 0, 1)
+    );
+    const settled = Math.max(0, this.#deathElapsed - DEATH.fallSeconds);
+
+    const feet = this.#position.y - this.#currentHeight / 2;
+    const eyeY =
+      THREE.MathUtils.lerp(this.#deathEye, feet + DEATH.groundEye, fall) -
+      settled * DEATH.driftSink;
+    const yaw =
+      THREE.MathUtils.lerp(this.#deathYaw, this.#deathTargetYaw, fall) +
+      settled * DEATH.driftYaw;
+    const pitch = THREE.MathUtils.lerp(this.#deathPitch, DEATH.pitch, fall);
+
+    ctx.camera.rotation.set(pitch, yaw, fall * DEATH.roll, 'YXZ');
+    _forward.set(-Math.sin(yaw), 0, -Math.cos(yaw));
+    _right.set(-_forward.z, 0, _forward.x);
+    ctx.camera.position.set(this.#position.x, eyeY, this.#position.z);
+    ctx.camera.position.addScaledVector(_right, fall * DEATH.slump);
+
+    ctx.viewmodelCamera.position.copy(ctx.camera.position);
+    ctx.viewmodelCamera.quaternion.copy(ctx.camera.quaternion);
+  }
+
   // -- public surface -------------------------------------------------------
 
   /** Read-only view of player state, consumed by weapon, audio, UI and AI. */
@@ -726,7 +906,7 @@ export class PlayerModule implements GameModule {
       sliding: this.#sliding,
       vaulting: this.#mantle !== null,
       health: this.#health,
-      alive: this.#health > 0,
+      alive: this.#life === 'alive',
       speed: Math.hypot(this.#velocity.x, this.#velocity.z),
       eyeHeight: this.#currentHeight / 2 + BODY.eyeOffset,
     };
@@ -772,6 +952,67 @@ export class PlayerModule implements GameModule {
   /** Multiplier on every stance's top speed. Used for the ADS slowdown. */
   setSpeedScale(scale: number): void {
     this.#speedScale = THREE.MathUtils.clamp(scale, 0.1, 1);
+  }
+
+  get lifeState(): PlayerLifeState {
+    return this.#life;
+  }
+
+  /** Whatever last dealt damage to the player, or null. */
+  get killerId(): string | null {
+    return this.#lastAttacker;
+  }
+
+  /**
+   * Takes the player out of play without killing them, for the lobby and the
+   * results screen. A death in progress is left alone: cutting the slump short
+   * to stand the camera back up reads as a glitch.
+   */
+  setInactive(): void {
+    if (this.#life === 'dead') return;
+
+    // A death raised this step but not yet committed still has to land. The
+    // round can end on the same step as the killing round -- the clock expires
+    // after the bots have fired, or the final point lands with a round already
+    // in the air -- and dropping the death there would stand the player back up
+    // over their own corpse on the results screen. Committing it here instead
+    // costs nothing: the match ignores the `player:died` that follows, because
+    // by the time it calls this its phase is no longer live, so a death on the
+    // final step cannot score after the round is over.
+    if (this.#pendingDeath && this.#ctx) {
+      this.#commitDeath(this.#ctx);
+      return;
+    }
+
+    this.#life = 'inactive';
+    this.#velocity.set(0, 0, 0);
+    this.#mantle = null;
+    this.#sliding = false;
+    this.#stepLift = 0;
+  }
+
+  /** Returns the player to play at full health. The respawn primitive. */
+  respawn(position: THREE.Vector3, yaw = this.#yaw): void {
+    this.#life = 'alive';
+    this.#pendingDeath = false;
+    this.#health = this.#maxHealth;
+    this.#lastAttacker = null;
+    this.#lastAttackerHeadshot = false;
+    this.#crouching = false;
+    this.#sprinting = false;
+    this.#travelled = 0;
+    this.#stepDistance = 0;
+    // Stand back up before repositioning, so the eye height the teleport
+    // derives is the standing one even if the player died crouched.
+    this.#currentHeight = BODY.standHeight;
+    this.#controller.setHeight(BODY.standHeight);
+    this.teleport(position, yaw);
+    this.#grounded = false;
+
+    const ctx = this.#ctx;
+    if (!ctx) return;
+    ctx.viewmodelScene.visible = true;
+    ctx.events.emit('player:respawned', { position: position.clone() });
   }
 
   /** Hard reposition, for spawning and teleports. */

@@ -156,3 +156,34 @@ export const CAMERA = {
    *  exactly so a drop still reads as a drop. */
   eyeLambda: 18,
 } as const;
+
+/**
+ * Death camera.
+ *
+ * A hard cut to a fixed angle reads as a disconnect rather than a death, so
+ * the view slumps to the ground over most of a second and then keeps drifting
+ * for as long as the body lies there. The drift is what stops the results
+ * screen from looking like a paused frame.
+ */
+export const DEATH = {
+  fallSeconds: 0.9,
+  /** Eye height above the feet once the body has come to rest, metres. */
+  groundEye: 0.34,
+  /** Roll at rest, radians. 34 degrees: the head has gone over, not through. */
+  roll: 0.6,
+  /** Pitch at rest. Slightly down, looking along the ground. */
+  pitch: -0.2,
+  /** How far the view turns back down the line the killing round came from.
+   *  Partial, not all the way: being shown the shooter is information, being
+   *  swung onto them is a cutscene. */
+  faceKiller: 0.65,
+  /** Post-slump drift, radians/s of yaw and metres/s of sink. */
+  driftYaw: 0.055,
+  driftSink: 0.012,
+  /** Lateral offset at rest, metres, as the body falls off its own axis. */
+  slump: 0.22,
+  /** Distance back along the incoming round used to place the shooter for the
+   *  turn. The bullet's line is the only direction to the killer available;
+   *  neither damage event carries the shooter's position. */
+  killerBacktrack: 8,
+} as const;

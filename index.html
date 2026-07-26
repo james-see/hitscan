@@ -89,37 +89,6 @@
         font-variant-numeric: tabular-nums;
       }
 
-      /* -- click to play ------------------------------------------------- */
-      #start-prompt {
-        position: absolute;
-        inset: 0;
-        display: none;
-        align-items: center;
-        justify-content: center;
-        flex-direction: column;
-        gap: 14px;
-        background: rgba(5, 7, 10, 0.55);
-        backdrop-filter: blur(4px);
-        z-index: 90;
-        cursor: pointer;
-      }
-      #start-prompt.visible { display: flex; }
-      #start-prompt .cta {
-        font-size: 15px;
-        letter-spacing: 0.32em;
-        text-indent: 0.32em;
-        text-transform: uppercase;
-        padding: 14px 30px;
-        border: 1px solid rgba(255, 157, 46, 0.5);
-        color: var(--accent);
-        background: rgba(255, 157, 46, 0.06);
-      }
-      #start-prompt .hint {
-        font-size: 11px;
-        letter-spacing: 0.18em;
-        color: #64748b;
-        text-transform: uppercase;
-      }
       #error {
         position: absolute;
         inset: 0;
@@ -143,11 +112,6 @@
     <div id="app">
       <canvas id="viewport"></canvas>
       <div id="hud"></div>
-
-      <div id="start-prompt">
-        <div class="cta">Click to deploy</div>
-        <div class="hint">WASD move &middot; Shift sprint &middot; Ctrl crouch &middot; R reload &middot; Esc release cursor</div>
-      </div>
 
       <div id="loader">
         <h1>HITSCAN</h1>
