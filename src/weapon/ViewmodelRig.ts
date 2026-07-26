@@ -58,8 +58,17 @@ export interface RigInput {
  *
  * The roll is positive — the top cants inboard, toward the player's
  * centreline, the way a right-handed shooter carries one.
+ *
+ * Position and distance carry everything the yaw used to. Turning the weapon
+ * across the frame slimmed it for free, and giving that up cost 76mm of drop
+ * and 70mm of standoff to buy back: the optic used to break the horizon at
+ * 44% of frame height and the viewmodel ate 10.5% of the pixels, against 55%
+ * and 8.3% now. Distance and drop are not interchangeable and both are
+ * needed — pushing it away alone converges the whole weapon on the vanishing
+ * point at the centre of the screen, which shrinks it but also makes it read
+ * as floating out in front of the player rather than being carried.
  */
-const HIP_POSE = new Pose(0.168, -0.112, -0.735, 0.02, 0.13, 0.045);
+const HIP_POSE = new Pose(0.202, -0.188, -0.805, 0.025, 0.13, 0.05);
 
 /**
  * Hip fire. The weapon squares up and rises the last few degrees onto the
@@ -68,15 +77,25 @@ const HIP_POSE = new Pose(0.168, -0.112, -0.735, 0.02, 0.13, 0.045);
  *
  * Small on purpose. The pose it starts from already points down range, so
  * this is the difference between held ready and pressed out, not a snap to a
- * second position.
+ * second position. What matters is its offset from `HIP_POSE` — 24mm of
+ * rise, 35mm back toward the shoulder and half the cant — so when the hold
+ * is re-framed this moves with it. Left where it was, re-framing would have
+ * quietly turned the press-out into a lunge.
  */
-const HIP_FIRE_POSE = new Pose(0.146, -0.096, -0.7, 0.008, 0.055, 0.022);
+const HIP_FIRE_POSE = new Pose(0.18, -0.164, -0.77, 0.013, 0.055, 0.027);
 /**
  * Low ready. The weapon drops out of the line of sight and cants across the
  * body, which is both the real technique and the clearest possible signal
  * that the player cannot currently shoot.
+ *
+ * Dropped and pushed out alongside the hip hold rather than left where it
+ * was. It is authored in camera space, not as an offset, so lowering the
+ * base without touching it would have made the weapon rise as the player
+ * broke into a run. It still comes closer to the eye than the hold does,
+ * which is the point of a low ready — the weapon is tucked in against the
+ * body — but not by the two-to-one it worked out at once the hold moved.
  */
-const SPRINT_POSE = new Pose(0.15, -0.15, -0.4, -0.25, 0.5, 0.45);
+const SPRINT_POSE = new Pose(0.17, -0.19, -0.45, -0.25, 0.5, 0.45);
 
 /**
  * Distance from the eye to the optic's reticle while aiming, in metres.

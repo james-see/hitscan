@@ -1167,15 +1167,19 @@ export function buildAssaultRifle(): RifleParts {
     around(118 * D, 0.003, gripZ - 0.028, [0.026, 0.021, 0.036], 0.009);
     around(104 * D, 0.001, gripZ - 0.066, [0.022, 0.018, 0.042], 0.008);
 
-    // Wrist and forearm, every part aligned to one axis running down, out to
-    // the shooter's left and slightly back, so the arm leaves the frame at the
-    // bottom-left corner instead of standing up through the middle of it.
+    // -- support forearm ----------------------------------------------------
+    // The forearm is the nearest object to the eye in the whole viewmodel and
+    // the largest single shape on screen, so it gets the same treatment as
+    // the weapon: real proportions first, then landmarks.
     //
-    // Oval in section and tapered wrist to elbow, with the seam running along
-    // it. The previous forearm was a constant-diameter cylinder banded by
-    // three rings, which is the silhouette of a suppressor: the art director
-    // read it as the muzzle end of the weapon and complained that the muzzle
-    // was a plain tan cylinder. Nothing here is allowed to encircle the arm.
+    // What was here was a cone 94mm across at the wrist narrowing to 54mm at
+    // the elbow — the taper of a limb, inverted. A forearm is thinnest at the
+    // wrist and thickest two thirds of the way to the elbow, and getting that
+    // backwards is most of why this read as a length of pipe rather than an
+    // arm: the eye knows the shape of a forearm even when it cannot say why
+    // the drawing is wrong. Everything below is in the arm's own cylindrical
+    // frame for the same reason the fingers were, so nothing drifts off the
+    // surface the next time the arm is re-aimed.
     /** Unit vector down the arm toward the shoulder, in weapon space. */
     const down = normalise(ARM_DIRECTION);
     // Euler that aims a Z-axis primitive down `down`, solved rather than
@@ -1192,41 +1196,203 @@ export function buildAssaultRifle(): RifleParts {
       BORE_Y - 0.056 + down[1] * t + out[1],
       gripZ + 0.0525 + down[2] * t + out[2],
     ];
-    /** Half-length of the sleeve, after the 0.85 foreshortening scale. */
-    const armEnd = 0.21 + (0.44 * 0.85) / 2;
+
+    /** Section ratio: a forearm is wider across than it is deep. */
+    const OVAL = 1.12;
+    /**
+     * Forearm profile as (radius, distance from the wrist), in metres.
+     *
+     * Built to a 174mm wrist and a 280mm forearm circumference over a sleeve,
+     * which is an average adult male. The two inflections are the whole point
+     * of authoring it as a profile rather than a cone: the belly of the
+     * flexor mass two thirds out, and the waist where it necks into the
+     * elbow before the upper arm swells again. Both land in the silhouette,
+     * so they survive any lighting, and a limb with a joint in it cannot be
+     * mistaken for a tube.
+     */
+    const forearm: readonly (readonly [number, number])[] = [
+      [0.0298, 0.004],
+      [0.0316, 0.022],
+      [0.0348, 0.05],
+      [0.0392, 0.088],
+      [0.0436, 0.13],
+      [0.0468, 0.172],
+      [0.0484, 0.212],
+      [0.0479, 0.248],
+      [0.0451, 0.286],
+      [0.0448, 0.308],
+      [0.0489, 0.348],
+      [0.0522, 0.394],
+    ];
+    /** Where the arm ends and the dome caps it. */
+    const armEnd = forearm[forearm.length - 1][1];
+    /** Forearm radius at `t`, so every detail below sits on the surface. */
+    const armRadius = (t: number): number => {
+      for (let i = 1; i < forearm.length; i++) {
+        const [r0, t0] = forearm[i - 1];
+        const [r1, t1] = forearm[i];
+        if (t <= t1) return r0 + ((r1 - r0) * (t - t0)) / (t1 - t0);
+      }
+      return forearm[forearm.length - 1][0];
+    };
+
+    const armQuat = new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(armRot[0], armRot[1], armRot[2], 'XYZ')
+    );
+    const armOrigin = alongArm(0, [0, 0, 0]);
+    const _spin = new THREE.Quaternion();
+    const _part = new THREE.Quaternion();
+    const _offset = new THREE.Vector3();
+    const _euler = new THREE.Euler(0, 0, 0, 'XYZ');
+    /**
+     * Places a part on the forearm's surface.
+     *
+     * `t` runs from the wrist toward the elbow and `angle` around the arm
+     * from its local +X. 90 degrees is the face turned to the camera at hip
+     * and 180 is the one the key light rakes, which is where anything meant
+     * to catch a highlight belongs. `lift` is the standoff beyond the
+     * surface and `twist` turns the part within the surface, which is what
+     * lets a fold run diagonally across the arm the way cloth actually
+     * gathers. Sizes read (tangential, radial, along the arm).
+     */
+    const onArm = (
+      material: string,
+      geometry: THREE.BufferGeometry,
+      t: number,
+      angle: number,
+      lift: number,
+      twist = 0
+    ): void => {
+      const r = armRadius(t) + lift;
+      _offset
+        .set(Math.cos(angle) * r * OVAL, Math.sin(angle) * r, t)
+        .applyQuaternion(armQuat);
+      _part
+        .copy(armQuat)
+        .multiply(_spin.setFromEuler(_euler.set(0, 0, angle - Math.PI / 2)))
+        .multiply(_spin.setFromEuler(_euler.set(0, twist, 0)));
+      _euler.setFromQuaternion(_part, 'XYZ');
+      hand.add(
+        material,
+        geometry,
+        [armOrigin[0] + _offset.x, armOrigin[1] + _offset.y, armOrigin[2] + _offset.z],
+        [_euler.x, _euler.y, _euler.z]
+      );
+    };
+    /**
+     * Stands an axial primitive up out of the arm instead of along it.
+     *
+     * `onArm` hands a part its Y pointing radially outward, so a cylinder —
+     * which is built down Z — needs turning a quarter turn to become a watch
+     * case sitting on a wrist rather than a section of the arm.
+     */
+    const radial = (geometry: THREE.BufferGeometry): THREE.BufferGeometry => {
+      geometry.rotateX(-Math.PI / 2);
+      return geometry;
+    };
+    /** Lays an axial primitive across the arm rather than along it. */
+    const across = (geometry: THREE.BufferGeometry): THREE.BufferGeometry => {
+      geometry.rotateY(Math.PI / 2);
+      return geometry;
+    };
+
+    const A = Math.PI / 180;
     // Back of the hand carried through to the wrist.
     hand.add('glove', roundedBox(0.03, 0.042, 0.05, 0.014, 3), alongArm(-0.036, [0.006, 0.004, 0]), armRot);
-    // Cuff: the seam between glove and sleeve, which stops the forearm
-    // reading as one continuous tan pipe running out of the frame.
-    hand.add('glove', tube(0.028, 0.03, 0.016, 20), alongArm(-0.008, [0, 0, 0]), armRot, [1.12, 1, 1]);
-    // One tube for the whole forearm rather than two butted together: at hip
-    // the join between them fell in open frame and read as a break in the arm.
-    hand.add('sleeve', tube(0.027, 0.047, 0.44, 22), alongArm(0.21, [0, 0, 0]), armRot, [1.14, 1, 0.85]);
-    // Rolled cuff at the wrist, where a cuff belongs and where the glove ends.
-    hand.add('sleeve', tube(0.032, 0.031, 0.013, 20), alongArm(0, [0, 0, 0]), armRot, [1.1, 1, 0.88]);
-    // Sleeve seam, running the length of the arm.
-    hand.add('sleeve', tube(0.0045, 0.005, 0.26, 12), alongArm(0.13, [-0.032, 0.005, -0.007]), armRot);
-    // Dome over the elbow end. At hip this is well outside the frame, but the
-    // reload swings the whole arm across open shot, and a cylinder cut off
-    // square there reads as an amputation rather than a limb continuing past
-    // the edge of the picture. Its base is the sleeve's own 27mm far radius
-    // and it carries the same 1.14 oval; anything wider stands out as a skirt.
+    // Glove cuff, which the sleeve is then gathered over.
+    hand.add('glove', tube(0.028, 0.03, 0.016, 20), alongArm(-0.008, [0, 0, 0]), armRot, [OVAL, 1, 1]);
+    // The forearm itself.
+    hand.add('sleeve', lathe(forearm, 26), armOrigin, armRot, [OVAL, 1, 1]);
+    // Sleeve cuff: gathered over the glove, rolled at its edge and tucked
+    // back into the arm. This is the one band allowed to go the whole way
+    // round — it is a cuff, next to a hand, and reads as one. Evenly spaced
+    // rings further up the arm are what made the previous forearm read as a
+    // suppressor, and nothing below encircles it.
     hand.add(
       'sleeve',
       lathe(
         [
-          [0, 0.03],
-          [0.0092, 0.0282],
-          [0.0174, 0.023],
-          [0.0221, 0.0172],
-          [0.0254, 0.0103],
-          [0.027, 0],
+          [0.0316, 0],
+          [0.0352, 0.006],
+          [0.0358, 0.015],
+          [0.0334, 0.025],
+          [0.0308, 0.031],
         ],
-        22
+        24
+      ),
+      armOrigin,
+      armRot,
+      [OVAL, 1, 1]
+    );
+    // Folds. These are the difference between a limb and a length of pipe,
+    // and they have to be built rather than painted: a smooth cone under a
+    // broad probe has almost no value change along its length, so the eye
+    // gets no cue about form. Each one is a shallow ridge running diagonally
+    // across the arm, the way cloth gathers between two points that move
+    // relative to each other — heaviest at the cuff and ahead of the elbow,
+    // sparse over the belly where the sleeve is stretched tight. Twisted so
+    // no two are parallel and none of them closes into a band.
+    //
+    // Each is a cylinder laid across the arm and sunk most of the way in, so
+    // what stands proud is a rounded ridge. A chord that long across a curve
+    // this tight buries its own ends, which is the point: the fold dies away
+    // instead of stopping at a hard edge. A box does not do this — the first
+    // attempt used one and the folds read as rectangular patches sewn on.
+    const fold = (t: number, angle: number, twist: number, length: number, size: number): void => {
+      onArm('sleeve', across(tube(size, size, length, 14)), t, angle, -size * 0.83, twist);
+    };
+    fold(0.042, 124 * A, 0.32, 0.058, 0.019);
+    fold(0.072, 158 * A, -0.3, 0.05, 0.016);
+    fold(0.104, 96 * A, 0.46, 0.052, 0.015);
+    fold(0.228, 134 * A, -0.36, 0.058, 0.017);
+    fold(0.258, 74 * A, 0.44, 0.05, 0.015);
+    // Flexor mass down the inside of the forearm. A lathe is round in section
+    // and a forearm is not: this one swell is what stops the highlight
+    // running as a single unbroken stripe from the cuff to the elbow.
+    onArm('sleeve', tube(0.03, 0.021, 0.2, 18), 0.14, 58 * A, -0.026);
+    // Outseam, in three segments that each follow the swell rather than one
+    // straight welt that would submerge at the belly and float at the wrist.
+    onArm('sleeve', roundedBox(0.007, 0.005, 0.072, 0.0025), 0.058, 166 * A, -0.002);
+    onArm('sleeve', roundedBox(0.007, 0.005, 0.078, 0.0025), 0.134, 166 * A, -0.002);
+    onArm('sleeve', roundedBox(0.0065, 0.005, 0.08, 0.0025), 0.216, 166 * A, -0.002);
+    // Watch on the back of the wrist: the single clearest signal that what
+    // crosses the frame is an arm and not a pipe, because it is an object of
+    // known size sitting on a limb at a known place. Round rather than a
+    // rounded box — a square of the same footprint read as a plate bolted to
+    // the sleeve, since nothing about it said watch except its position. The
+    // strap stops either side of the case instead of closing into a ring.
+    onArm('rubber', roundedBox(0.021, 0.008, 0.026, 0.003), 0.066, 46 * A, -0.002);
+    onArm('rubber', roundedBox(0.021, 0.008, 0.026, 0.003), 0.066, 134 * A, -0.002);
+    onArm('polymer', radial(tube(0.0206, 0.0212, 0.0105, 22)), 0.066, 90 * A, 0.0035);
+    onArm('steel', radial(tube(0.0178, 0.0206, 0.0055, 22)), 0.066, 90 * A, 0.0095);
+    onArm('rubber', radial(tube(0.0158, 0.0158, 0.0022, 20)), 0.066, 90 * A, 0.0118);
+    // Elbow pad over the joint. Sleeve fabric rather than a hard shell: a
+    // grey plate here read as armour bolted to the arm, and the point of the
+    // pad is to mark where the limb bends, not to add a second material.
+    onArm('sleeve', roundedBox(0.054, 0.014, 0.07, 0.018, 3), 0.294, 96 * A, -0.003);
+    onArm('sleeve', roundedBox(0.013, 0.005, 0.058, 0.003), 0.294, 34 * A, -0.0015);
+    onArm('sleeve', roundedBox(0.013, 0.005, 0.058, 0.003), 0.294, 158 * A, -0.0015);
+    // Dome over the elbow end. At hip this is well outside the frame, but the
+    // reload swings the whole arm across open shot, and a cylinder cut off
+    // square there reads as an amputation rather than a limb continuing past
+    // the edge of the picture. Its base is the profile's own final radius and
+    // it carries the same oval; anything wider stands out as a skirt.
+    hand.add(
+      'sleeve',
+      lathe(
+        [
+          [0.0522, 0],
+          [0.0491, 0.0114],
+          [0.0427, 0.0208],
+          [0.0336, 0.0277],
+          [0.0178, 0.0325],
+          [0, 0.0345],
+        ],
+        24
       ),
       alongArm(armEnd, [0, 0, 0]),
       armRot,
-      [1.14, 1, 1]
+      [OVAL, 1, 1]
     );
     hand.build(supportHand, materials, 'hand_', 26);
   }
