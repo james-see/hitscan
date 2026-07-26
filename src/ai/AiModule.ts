@@ -224,8 +224,15 @@ export class AiModule implements GameModule {
   #applyQueryOverrides(): void {
     if (!import.meta.env.DEV || typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
-    const count = Number(params.get('bots'));
-    if (Number.isFinite(count) && count >= 0) this.#options.botCount = Math.min(count, 32);
+    // Tested for presence before conversion. `get` returns null for an absent
+    // parameter and `Number(null)` is 0, which passed the range check below
+    // and silently emptied the roster on every dev run that did not ask for
+    // bots -- which is all of them, including every critic capture.
+    const requested = params.get('bots');
+    if (requested !== null) {
+      const count = Number(requested);
+      if (Number.isFinite(count) && count >= 0) this.#options.botCount = Math.min(count, 32);
+    }
     const difficulty = params.get('difficulty');
     if (difficulty && difficulty in DIFFICULTIES) this.#options.difficulty = difficulty;
   }
