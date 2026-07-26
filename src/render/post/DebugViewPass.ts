@@ -12,7 +12,8 @@ export type DebugView =
   | 'velocity'
   | 'shafts'
   | 'roughness'
-  | 'ssr';
+  | 'ssr'
+  | 'metalness';
 
 const VIEW_INDEX: Record<DebugView, number> = {
   off: 0,
@@ -22,6 +23,7 @@ const VIEW_INDEX: Record<DebugView, number> = {
   shafts: 4,
   roughness: 5,
   ssr: 6,
+  metalness: 7,
 };
 
 /**
@@ -103,6 +105,15 @@ export class DebugViewPass implements RenderPass {
             // SSR confidence. Zero everywhere means the pass produced nothing,
             // whatever it cost to find that out.
             result = vec3(texture2D(tSsr, vUv).a);
+          } else if (uView == 7) {
+            // Metalness, from the spare channel of the velocity attachment.
+            // Black everywhere means the render module is not writing it yet,
+            // which is indistinguishable in the final image from a scene with
+            // no metal in it.
+            float depth = texture2D(tDepth, vUv).r;
+            result = depth >= 1.0
+              ? vec3(0.0, 0.0, 1.0)
+              : vec3(texture2D(tVelocity, vUv).b);
           } else {
             result = texture2D(tDiffuse, vUv).rgb;
           }

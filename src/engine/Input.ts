@@ -10,7 +10,10 @@ const DEFAULT_BINDINGS: Record<InputAction, string> = {
   crouch: 'ControlLeft',
   sprint: 'ShiftLeft',
   fire: 'Mouse0',
-  aim: 'Mouse1',
+  // MouseEvent.button numbers the middle button 1 and the right button 2, so
+  // the conventional right-click to aim is Mouse2. Mouse1 bound it to the
+  // scroll wheel click, where nobody would ever find it.
+  aim: 'Mouse2',
   reload: 'KeyR',
   melee: 'KeyV',
   interact: 'KeyF',

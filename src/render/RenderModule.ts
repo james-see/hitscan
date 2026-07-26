@@ -5,7 +5,7 @@ import { CascadedShadowMaps } from './CascadedShadowMaps.ts';
 import { SkyDome } from './SkyDome.ts';
 import { Photometry } from './Lighting.ts';
 import { LocalLights, type LocalLightDescription } from './LocalLights.ts';
-import { ForwardPipeline, type DebugView } from './Pipeline.ts';
+import { ForwardPipeline, DEBUG_VIEWS, type DebugView } from './Pipeline.ts';
 import { ScreenSpaceOcclusion } from './ScreenSpaceOcclusion.ts';
 import { Atmosphere } from './Atmosphere.ts';
 import { SceneMaterials } from './SceneMaterials.ts';
@@ -117,6 +117,25 @@ export class RenderModule implements GameModule {
         setFog: (options) => this.#atmosphere.configure(options),
         setOcclusion: (options) => Object.assign(this.#occlusion ?? {}, options),
       };
+
+      // `?gbuf=metalness` and friends put a raw G-buffer channel on screen from
+      // boot. This is what makes the encoding contract measurable through the
+      // capture harness rather than only through the devtools console: the
+      // harness passes query fragments through unchanged, so a channel can be
+      // photographed by the same deterministic path as a shaded frame and its
+      // values read off the PNG.
+      const requested = new URLSearchParams(window.location.search).get('gbuf');
+      if (requested !== null) {
+        if (!DEBUG_VIEWS.includes(requested as DebugView)) {
+          // Loud, because a mistyped view silently renders the normal frame and
+          // any measurement taken from it is measuring the wrong buffer.
+          console.error(
+            `[render] unknown gbuf view "${requested}"; expected one of ${DEBUG_VIEWS.join(', ')}`
+          );
+        } else {
+          pipeline.setDebugView(requested as DebugView);
+        }
+      }
     }
 
     this.#materials = new SceneMaterials(scene);

@@ -46,6 +46,52 @@ export class SsrPass implements RenderPass {
    */
   maxRoughness = 0.85;
 
+  /**
+   * Shapes the roughness-to-mip curve: `floor + (maxLevel - floor) *
+   * roughness^exponent`.
+   *
+   * The square root this replaces sent roughness 0.85 to level 4.6, a ~32 pixel
+   * average that agrees with the environment probe by construction, so the
+   * composite had nothing to contribute even before Fresnel scaled it down.
+   * Raising the exponent above 1 pushes the blur towards the genuinely rough
+   * end and leaves glossy surfaces some structure.
+   */
+  mipExponent = 1.6;
+  /**
+   * Blur applied even to a mirror.
+   *
+   * Not zero, because only a fraction of pixels return a hit: below about half
+   * a level the reflection stops being resolved from neighbouring hits and
+   * starts being resolved from the misses between them, which reads as speckle.
+   */
+  mipFloor = 0.6;
+
+  /**
+   * Reflectance of metal at normal incidence.
+   *
+   * Real metals sit around 0.9 to 0.95. The point of the number is that it is
+   * an order of magnitude above the dielectric 0.04, which is what made every
+   * reflection in the frame invisible.
+   */
+  metalReflectance = 0.9;
+  /**
+   * How much of the surface's hue is carried into its metallic F0, 0 to 1.
+   *
+   * The G-buffer carries no albedo, so the shaded colour has to stand in for
+   * it, and its brightness is lighting rather than reflectance. Only the hue is
+   * usable, and only partly: a red container lit by a warm sun reads far redder
+   * than its base colour, and tinting fully would make its reflections glow.
+   */
+  metalTint = 0.5;
+  /**
+   * Forces a metalness value for bring-up. Negative reads the G-buffer.
+   *
+   * The channel this pass consumes is written by the render module, so the two
+   * halves land separately; this makes the consumer testable on its own instead
+   * of indistinguishable from a producer that is not writing yet.
+   */
+  metalnessOverride = -1;
+
   #post: PostContext;
   #width = 1;
   #height = 1;
@@ -343,12 +389,19 @@ export class SsrPass implements RenderPass {
         tReflectionOdd: { value: null },
         tDepth: { value: null },
         tNormal: { value: null },
+        tVelocity: { value: null },
         tEnvironment: { value: null },
         uInvProjection: { value: new THREE.Matrix4() },
         uViewInverse: { value: new THREE.Matrix4() },
         uIntensity: { value: 1 },
         uMaxLevel: { value: 5 },
         uEnvironmentIntensity: { value: 1 },
+        uMipExponent: { value: 1.6 },
+        uMipFloor: { value: 0.6 },
+        uMetalReflectance: { value: 0.9 },
+        uMetalTint: { value: 0.5 },
+        uMetalness: { value: -1 },
+        uHasMetalness: { value: 0 },
       },
       fragmentShader: /* glsl */ `
         precision highp float;
@@ -357,12 +410,19 @@ export class SsrPass implements RenderPass {
         uniform sampler2D tReflectionOdd;
         uniform sampler2D tDepth;
         uniform sampler2D tNormal;
+        uniform sampler2D tVelocity;
         uniform sampler2D tEnvironment;
         uniform mat4 uInvProjection;
         uniform mat4 uViewInverse;
         uniform float uIntensity;
         uniform float uMaxLevel;
         uniform float uEnvironmentIntensity;
+        uniform float uMipExponent;
+        uniform float uMipFloor;
+        uniform float uMetalReflectance;
+        uniform float uMetalTint;
+        uniform float uMetalness;
+        uniform float uHasMetalness;
         varying vec2 vUv;
         ${GLSL_MATH}
         ${GLSL_DEPTH}
@@ -395,7 +455,11 @@ export class SsrPass implements RenderPass {
           // Wider lobes read from blurrier levels of the reflection pyramid.
           // Anchoring the mapping to the pyramid depth keeps the perceived
           // blur resolution-independent.
-          float mip = clamp(sqrt(roughness) * uMaxLevel, 0.0, uMaxLevel);
+          float mip = clamp(
+            uMipFloor + (uMaxLevel - uMipFloor) * pow(roughness, uMipExponent),
+            0.0,
+            uMaxLevel
+          );
           vec4 reflection = sampleReflection(vUv, mip);
           float confidence = saturate(reflection.a);
           if (confidence <= 0.001) {
@@ -412,13 +476,36 @@ export class SsrPass implements RenderPass {
             probe = textureCubeUV(tEnvironment, worldReflect, roughness).rgb * uEnvironmentIntensity;
           #endif
 
-          // Schlick with a dielectric F0 and a roughness-aware horizon term.
-          // The G-buffer carries no metalness, so treating everything as a
-          // dielectric under-reflects metal rather than over-reflecting
-          // plaster, which is the safer error.
-          float f = pow(1.0 - NdotV, 5.0);
-          float fresnel = 0.04 + (max(1.0 - roughness, 0.04) - 0.04) * f;
+          // Metalness rides in the spare channel of the velocity attachment.
+          // Without it every surface was a dielectric reflecting 4% head-on,
+          // and since the horizon term only lifts that at grazing angles, the
+          // whole pass came out below one 8-bit level.
+          float metalness = uMetalness >= 0.0
+            ? uMetalness
+            : texture2D(tVelocity, vUv).b * uHasMetalness;
+          metalness = saturate(metalness);
 
+          // Metallic F0 is the base colour, which the G-buffer does not carry,
+          // so the shaded colour stands in for it. Only its hue is meaningful
+          // -- the brightness is the lighting that produced it -- so it is
+          // normalised to its own maximum and mixed back towards white.
+          vec3 hue = saturate(color / max(maxComponent(color), 1e-4));
+          vec3 f0 = mix(
+            vec3(0.04),
+            mix(vec3(1.0), hue, uMetalTint) * uMetalReflectance,
+            metalness
+          );
+
+          // Schlick with a roughness-aware horizon term, so a rough surface
+          // does not develop a hard bright rim at the silhouette.
+          float f = pow(1.0 - NdotV, 5.0);
+          vec3 fresnel = f0 + (max(vec3(1.0 - roughness), f0) - f0) * f;
+
+          // A difference rather than an addition: the forward pass has already
+          // lit this pixel from the environment probe, so what the trace adds
+          // is the correction from probe to what is actually on screen. Getting
+          // that wrong shows up as reflections that glow rather than as missing
+          // ones, which is why the tint is held back rather than taken whole.
           vec3 delta = (traced - probe) * confidence * fresnel * uIntensity;
           gl_FragColor = vec4(max(color + delta, 0.0), 1.0);
         }
@@ -590,6 +677,13 @@ export class SsrPass implements RenderPass {
     composite.set('tReflectionOdd', reflection.odd.texture);
     composite.set('tDepth', post.depth);
     composite.set('tNormal', post.normalRoughness);
+    composite.set('tVelocity', post.velocity);
+    composite.set('uHasMetalness', post.velocity === null ? 0 : 1);
+    composite.set('uMipExponent', this.mipExponent);
+    composite.set('uMipFloor', this.mipFloor);
+    composite.set('uMetalReflectance', this.metalReflectance);
+    composite.set('uMetalTint', this.metalTint);
+    composite.set('uMetalness', this.metalnessOverride);
     (composite.uniforms.uInvProjection!.value as THREE.Matrix4).copy(
       post.jitteredProjectionInverse
     );

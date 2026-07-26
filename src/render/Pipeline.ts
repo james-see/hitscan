@@ -11,7 +11,8 @@ import type { ScreenSpaceOcclusion } from './ScreenSpaceOcclusion.ts';
  *
  * Frame order:
  *   1. cascade fitting and the shadow atlas, using this frame's final camera
- *   2. MRT depth prepass into the G-buffer (normals, roughness, motion)
+ *   2. MRT depth prepass into the G-buffer (normals, roughness, motion,
+ *      metalness)
  *   3. forward opaque + transparent + sky into an HDR target
  *   4. viewmodel, with its own camera and cleared depth
  *   5. post passes, ping-ponged, ending at the backbuffer
@@ -341,8 +342,15 @@ export class ForwardPipeline implements RenderPipeline {
               c = vec3(abs(texture2D(tVelocity, vUv).rg) * 40.0, 0.0);
             } else if (uMode == 4) {
               c = vec3(texture2D(tOcclusion, vUv).r);
-            } else {
+            } else if (uMode == 5) {
               c = vec3(texture2D(tOcclusion, vUv).g);
+            } else {
+              // Raw metalness, unscaled, so the value can be read straight off
+              // the image and counted. Deliberately not flagging the sky:
+              // background metalness is genuinely zero and must be countable
+              // as such, so a black pixel here means "dielectric or nothing"
+              // and that is the honest answer.
+              c = vec3(texture2D(tVelocity, vUv).b);
             }
             gl_FragColor = vec4(c, 1.0);
           }
@@ -352,7 +360,15 @@ export class ForwardPipeline implements RenderPipeline {
       });
     }
     const material = this.#debugMaterial;
-    const modes: DebugView[] = ['normals', 'roughness', 'depth', 'velocity', 'occlusion', 'contact'];
+    const modes: DebugView[] = [
+      'normals',
+      'roughness',
+      'depth',
+      'velocity',
+      'occlusion',
+      'contact',
+      'metalness',
+    ];
     material.uniforms.tNormal!.value = this.gbuffer.normalRoughness;
     material.uniforms.tDepth!.value = this.gbuffer.depth;
     material.uniforms.tVelocity!.value = this.gbuffer.velocity;
@@ -438,7 +454,19 @@ export type DebugView =
   | 'depth'
   | 'velocity'
   | 'occlusion'
-  | 'contact';
+  | 'contact'
+  | 'metalness';
+
+/** Every `DebugView` except `off`, for validating a name from outside. */
+export const DEBUG_VIEWS: readonly DebugView[] = [
+  'normals',
+  'roughness',
+  'depth',
+  'velocity',
+  'occlusion',
+  'contact',
+  'metalness',
+];
 
 /** Shared full-screen triangle vertex shader. Reused by every post pass. */
 export const FULLSCREEN_VERTEX_SHADER = /* glsl */ `

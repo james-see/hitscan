@@ -22,6 +22,22 @@ export interface GBuffer {
   readonly target: THREE.WebGLRenderTarget;
   readonly depth: THREE.Texture;
   readonly normalRoughness: THREE.Texture;
+  /**
+   * Screen-space motion in `.rg`, metalness in `.b`, `.a` reserved.
+   *
+   * Metalness rides in the spare channel of an attachment that already
+   * exists rather than in one of its own. Without it, screen-space
+   * reflections had no way to tell metal from plaster and applied a
+   * dielectric Fresnel of 0.04 to everything, which made the entire pass
+   * invisible: it traced correct reflections over a fifth of the frame and
+   * then multiplied them down below one 8-bit level.
+   *
+   * The alternative was octahedral normals, freeing a channel on attachment
+   * 0 at no bandwidth cost. That is the better packing and the right move if
+   * this attachment's cost ever shows up in a profile that can be trusted,
+   * but it rewrites every consumer of the normal buffer for a saving nobody
+   * can currently measure.
+   */
   readonly velocity: THREE.Texture;
   readonly width: number;
   readonly height: number;

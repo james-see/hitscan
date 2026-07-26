@@ -43,22 +43,34 @@ export interface RigInput {
  * into the right margin they become two dark lumps against the weapon no
  * matter how well they are modelled.
  *
- * The yaw is the delicate number, and it is set by occlusion rather than by
- * taste. A carbine held at 17 degrees off the view axis hides its own front
- * end: the barrel and flash hider stand 80mm forward of a handguard 25mm in
- * radius, so they only clear its silhouette once the bore is about 25 degrees
- * off the line of sight. Below that the muzzle is geometrically inside the
- * tube in front of it, whatever the pose looks like otherwise, which is why
- * the previous hold showed no muzzle at all. 0.5rad clears it with margin and
- * still frames the whole weapon, butt pad included, inside the right edge.
+ * The yaw was previously 0.5rad, chosen so the barrel and flash hider cleared
+ * the silhouette of the handguard in front of them and the whole weapon could
+ * be read in a still. That is 29 degrees off the view axis, and it is wrong:
+ * rounds leave along the bore and land in the centre of the screen, so the
+ * weapon was visibly not pointing where it shot. It is the pose of someone
+ * showing you a rifle, not firing one.
+ *
+ * 0.13rad points it down range and accepts the consequence, which is that the
+ * front end is foreshortened behind its own handguard. That is what a carbine
+ * looks like from behind, and every game in this genre lives with it. The
+ * muzzle device earns its detail at ADS and on the inspect animation instead
+ * of by twisting the weapon across the frame to display it.
  *
  * The roll is positive — the top cants inboard, toward the player's
- * centreline, the way a right-handed shooter carries one. It used to lean the
- * other way, which swung the magazine out to the left and turned the frame
- * into a view of the weapon's underside, as though it were being carried
- * muzzle-down rather than held ready.
+ * centreline, the way a right-handed shooter carries one.
  */
-const HIP_POSE = new Pose(0.175, -0.115, -0.765, 0.02, 0.5, 0.05);
+const HIP_POSE = new Pose(0.168, -0.112, -0.735, 0.02, 0.13, 0.045);
+
+/**
+ * Hip fire. The weapon squares up and rises the last few degrees onto the
+ * line of the shot, driven by the trigger rather than by the recoil impulse
+ * so that it leads the first round instead of trailing it.
+ *
+ * Small on purpose. The pose it starts from already points down range, so
+ * this is the difference between held ready and pressed out, not a snap to a
+ * second position.
+ */
+const HIP_FIRE_POSE = new Pose(0.146, -0.096, -0.7, 0.008, 0.055, 0.022);
 /**
  * Low ready. The weapon drops out of the line of sight and cants across the
  * body, which is both the real technique and the clearest possible signal
@@ -134,6 +146,7 @@ export class ViewmodelRig {
   #landing = new Spring1(4.2, 0.42);
   #bobPhase = 0;
   #collision = 0;
+  #hipFire = 0;
   #breathPhase = 0;
 
   // Fixed-step pose history, interpolated at render time.
@@ -267,7 +280,17 @@ export class ViewmodelRig {
     const sway = input.swayScale * (1 - 0.72 * ads);
 
     // -- base pose ----------------------------------------------------------
-    blendPose(this.#basePose, HIP_POSE, this.#adsPose, ads);
+    // The press-out is damped rather than tracking the trigger directly: at
+    // the weapon's rate of fire the trigger signal is a square wave, and
+    // following it exactly would vibrate the pose once per round.
+    this.#hipFire = damp(
+      this.#hipFire,
+      input.triggerPull * (1 - ads),
+      input.triggerPull > this.#hipFire ? 16 : 5,
+      dt
+    );
+    blendPose(this.#basePose, HIP_POSE, HIP_FIRE_POSE, this.#hipFire);
+    blendPose(this.#basePose, this.#basePose, this.#adsPose, ads);
     if (input.sprint > 1e-3) {
       blendPose(this.#basePose, this.#basePose, SPRINT_POSE, input.sprint);
     }

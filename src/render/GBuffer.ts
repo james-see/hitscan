@@ -9,7 +9,13 @@ import type { GBuffer } from '@/types/render.ts';
  * attachments plus depth is enough for AO, SSR, TAA and motion blur.
  *
  *   attachment 0 - RGBA16F : view-space normal (rgb), roughness (a)
- *   attachment 1 - RG16F   : screen-space motion vector, in NDC per frame
+ *   attachment 1 - RGBA16F : screen-space motion vector in NDC per frame (rg),
+ *                            metalness (b), reserved (a)
+ *
+ * Metalness rides in the spare channel of attachment 1 rather than in an
+ * attachment of its own. Screen-space reflections need it to tell metal from
+ * dielectric; without it the composite applied a Fresnel of 0.04 everywhere
+ * and the whole pass landed below one 8-bit level.
  */
 export class DeferredGBuffer implements GBuffer {
   readonly target: THREE.WebGLRenderTarget;
@@ -39,8 +45,9 @@ export class DeferredGBuffer implements GBuffer {
       normal.format = THREE.RGBAFormat;
     }
     if (velocity) {
-      velocity.name = 'gbuffer.velocity';
-      velocity.format = THREE.RGFormat;
+      // Named for its first two channels, which is all most consumers read.
+      velocity.name = 'gbuffer.velocityMetalness';
+      velocity.format = THREE.RGBAFormat;
     }
 
     // A depth texture rather than a renderbuffer, so effects can sample it.
@@ -62,6 +69,7 @@ export class DeferredGBuffer implements GBuffer {
     return this.target.textures[0] as THREE.Texture;
   }
 
+  /** Motion vector in `.rg`, metalness in `.b`, `.a` reserved. */
   get velocity(): THREE.Texture {
     return this.target.textures[1] as THREE.Texture;
   }

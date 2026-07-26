@@ -18,7 +18,7 @@ import type { GBuffer } from '@/types/render.ts';
  *        shades with (`material.roughness * roughnessMap.g`). GGX alpha is
  *        `a * a`.
  *
- * attachment 1, RG16F (`gbuffer.velocity`)
+ * attachment 1, RGBA16F (`gbuffer.velocity`)
  *   rg   screen-space motion in NDC units for this frame, defined as
  *        `ndcCurrent - ndcPrevious`. Both endpoints are UNJITTERED, so the
  *        vector is free of TAA sub-pixel offset regardless of what the
@@ -28,6 +28,12 @@ import type { GBuffer } from '@/types/render.ts';
  *        points from the old position to the new one).
  *        Sky and background pixels carry the camera-rotation-only motion of a
  *        point at infinity, so temporal passes need no special case there.
+ *   b    metalness in [0,1], the same value the forward pass shades with
+ *        (`material.metalness * metalnessMap.b`). ZERO IS A REAL VALUE here,
+ *        not a sentinel: most of the scene is dielectric and must read 0 so
+ *        reflections stay at a dielectric Fresnel. Use the zero-length normal
+ *        in attachment 0 to detect "no surface".
+ *   a    reserved, written as 0.
  *
  * depth (`gbuffer.depth`, DEPTH24_STENCIL8)
  *   Non-linear window depth in [0,1] from the SAME projection the forward
@@ -218,33 +224,42 @@ const VERTEX_MOTION = /* glsl */ `
 `;
 
 const FRAGMENT_DECLARATIONS = /* glsl */ `
-layout(location = 1) out vec2 gVelocity;
+layout(location = 1) out vec4 gVelocity;
 uniform vec2 gbufferJitter;
 varying vec4 vClipCurrent;
 varying vec4 vClipPrevious;
 `;
 
 /**
- * Emitted after the material's own output. `normal` and `roughnessFactor` are
- * three's own names and are still in scope at the end of main; whatever the
- * lighting chain computed before this point is dead and gets stripped.
+ * Emitted after the material's own output. `normal`, `roughnessFactor` and
+ * `metalnessFactor` are three's own names and are still in scope at the end of
+ * main; whatever the lighting chain computed before this point is dead and gets
+ * stripped.
+ *
+ * `metalnessFactor` comes out of `<metalnessmap_fragment>`, the same chunk pair
+ * that produces `roughnessFactor`, so metalness is sourced exactly where
+ * roughness is: the material's scalar times the map channel three itself picks.
  */
 const FRAGMENT_OUTPUT = /* glsl */ `
 	vec2 gbufferNdcCurrent = vClipCurrent.xy / vClipCurrent.w - gbufferJitter;
 	vec2 gbufferNdcPrevious = vClipPrevious.xy / vClipPrevious.w;
 	gl_FragColor = vec4( normalize( normal ), clamp( roughnessFactor, 0.0, 1.0 ) );
-	gVelocity = gbufferNdcCurrent - gbufferNdcPrevious;
+	gVelocity = vec4(
+		gbufferNdcCurrent - gbufferNdcPrevious,
+		clamp( metalnessFactor, 0.0, 1.0 ),
+		0.0
+	);
 `;
 
 /**
  * Builds the prepass variant of a material.
  *
  * Cloning the real material rather than hand-rolling a shader is what makes
- * the normal and roughness in the G-buffer agree with what the forward pass
- * actually shades: every UV transform, define and texture channel comes from
- * three's own material system instead of being reimplemented. The lighting
- * tail of the shader is dead once the output is overwritten and the compiler
- * removes it.
+ * the normal, roughness and metalness in the G-buffer agree with what the
+ * forward pass actually shades: every UV transform, define and texture channel
+ * comes from three's own material system instead of being reimplemented. The
+ * lighting tail of the shader is dead once the output is overwritten and the
+ * compiler removes it.
  */
 function buildVariant(source: THREE.Material, uniforms: PrepassUniforms): THREE.Material {
   const lit = source as THREE.MeshStandardMaterial;
@@ -252,14 +267,20 @@ function buildVariant(source: THREE.Material, uniforms: PrepassUniforms): THREE.
 
   const variant = lit.clone();
   variant.name = `${source.name}:gbuffer`;
-  // Only the normal and roughness inputs matter; dropping the rest shrinks
-  // the shader and avoids binding textures the prepass never reads.
+  // Only the normal, roughness and metalness inputs matter; dropping the rest
+  // shrinks the shader and avoids binding textures the prepass never reads.
+  // `metalnessMap` is kept: it is usually the same packed ORM texture as
+  // `roughnessMap`, so it costs no extra binding, and dropping it would flatten
+  // every mapped metal to its scalar.
   if (variant.alphaTest <= 0) variant.map = null;
   variant.aoMap = null;
   variant.emissiveMap = null;
-  variant.metalnessMap = null;
   variant.lightMap = null;
   variant.envMap = null;
+  // A non-finite scalar reaches the shader as NaN, and a NaN metalness would
+  // make a dielectric reflect like chrome rather than not at all.
+  if (!Number.isFinite(variant.metalness)) variant.metalness = 0;
+  if (!Number.isFinite(variant.roughness)) variant.roughness = 1;
   variant.transparent = false;
   variant.blending = THREE.NoBlending;
   variant.depthWrite = true;
@@ -286,7 +307,9 @@ function buildVariant(source: THREE.Material, uniforms: PrepassUniforms): THREE.
 
 /**
  * Fallback for materials outside the standard family (debug helpers, custom
- * shaders). Interpolated geometric normal, roughness pinned to 1.
+ * shaders). Interpolated geometric normal, roughness pinned to 1, metalness
+ * pinned to 0 — a material with no metalness input is a dielectric, and
+ * guessing anything else would light it up in the reflections.
  */
 function buildGenericVariant(source: THREE.Material, uniforms: PrepassUniforms): THREE.Material {
   const variant = new THREE.ShaderMaterial({
@@ -313,12 +336,12 @@ function buildGenericVariant(source: THREE.Material, uniforms: PrepassUniforms):
       in vec4 vClipCurrent;
       in vec4 vClipPrevious;
       layout(location = 0) out vec4 gNormalRoughness;
-      layout(location = 1) out vec2 gVelocity;
+      layout(location = 1) out vec4 gVelocity;
       void main() {
         vec2 ndcCurrent = vClipCurrent.xy / vClipCurrent.w - gbufferJitter;
         vec2 ndcPrevious = vClipPrevious.xy / vClipPrevious.w;
         gNormalRoughness = vec4( normalize( vViewNormal ), 1.0 );
-        gVelocity = ndcCurrent - ndcPrevious;
+        gVelocity = vec4( ndcCurrent - ndcPrevious, 0.0, 0.0 );
       }
     `,
     side: source.side,
@@ -360,7 +383,7 @@ function buildBackgroundFill(uniforms: Record<string, THREE.IUniform>): THREE.Me
       uniform vec2 jitter;
       in vec2 vNdc;
       layout(location = 0) out vec4 gNormalRoughness;
-      layout(location = 1) out vec2 gVelocity;
+      layout(location = 1) out vec4 gVelocity;
       void main() {
         vec4 farPoint = inverseViewProjection * vec4( vNdc, 1.0, 1.0 );
         vec3 direction = farPoint.xyz / farPoint.w - cameraWorldPosition;
@@ -369,7 +392,9 @@ function buildBackgroundFill(uniforms: Record<string, THREE.IUniform>): THREE.Me
         // A zero-length normal is the agreed sentinel for "no surface here";
         // screen-space effects use it to reject sky and unwritten pixels.
         gNormalRoughness = vec4( 0.0, 0.0, 0.0, 1.0 );
-        gVelocity = ( vNdc - jitter ) - previousNdc;
+        // Background metalness is 0: the sky is not a mirror, and anything the
+        // depth pass later covers overwrites this.
+        gVelocity = vec4( ( vNdc - jitter ) - previousNdc, 0.0, 0.0 );
       }
     `,
     depthTest: false,
