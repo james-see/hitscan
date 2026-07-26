@@ -11,7 +11,7 @@
  *   cat verdict.json | node tools/critic/gate.mjs --label render
  */
 
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, open, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -50,6 +50,40 @@ async function loadHistory() {
     return JSON.parse(await readFile(HISTORY, 'utf8'));
   } catch {
     return [];
+  }
+}
+
+/**
+ * Appends one entry to the shared history under an exclusive lock.
+ *
+ * The loop is meant to run per subsystem in parallel, so two gates can finish
+ * at once. Each holds an array it read minutes earlier, before scoring, and a
+ * plain write-back would silently drop the other's entry. Re-reading inside
+ * the lock keeps the append honest.
+ */
+async function appendHistory(entry) {
+  await mkdir(path.dirname(HISTORY), { recursive: true });
+  const lock = `${HISTORY}.lock`;
+
+  let handle;
+  for (let attempt = 0; attempt < 100; attempt++) {
+    try {
+      handle = await open(lock, 'wx');
+      break;
+    } catch (err) {
+      if (err.code !== 'EEXIST') throw err;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  }
+  if (!handle) throw new Error(`could not acquire ${lock} after 5s`);
+
+  try {
+    const history = await loadHistory();
+    history.push(entry);
+    await writeFile(HISTORY, JSON.stringify(history, null, 2));
+  } finally {
+    await handle.close();
+    await rm(lock, { force: true });
   }
 }
 
@@ -115,7 +149,7 @@ async function main() {
     console.log('');
   }
 
-  history.push({
+  await appendHistory({
     label: args.label,
     iteration,
     at: new Date().toISOString(),
@@ -127,8 +161,6 @@ async function main() {
     worstProblem: verdict.worstProblem,
     fixes: verdict.fixes,
   });
-  await mkdir(path.dirname(HISTORY), { recursive: true });
-  await writeFile(HISTORY, JSON.stringify(history, null, 2));
 
   // Exit code drives the loop: 0 stops, 1 iterates again.
   process.exit(result.passed ? 0 : 1);

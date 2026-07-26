@@ -19,7 +19,7 @@
 
 import { chromium } from 'playwright';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -70,9 +70,19 @@ export const DEFAULTS = {
   timeoutMs: 90_000,
 };
 
+/**
+ * Default output for a run that did not ask for a specific directory.
+ *
+ * Per-process, because `capture()` clears its output directory first: two
+ * agents both running with no `--out` would otherwise delete each other's
+ * images. `captures/latest` is republished as a symlink once a run finishes,
+ * so the stable path the other critic tools default to still resolves.
+ */
+const DEFAULT_OUT = path.join(ROOT, 'captures', `run-${process.pid}`);
+
 function parseArgs(argv) {
   const args = {
-    out: path.join(ROOT, 'captures', 'latest'),
+    out: DEFAULT_OUT,
     shot: null,
     width: DEFAULTS.width,
     height: DEFAULTS.height,
@@ -81,6 +91,7 @@ function parseArgs(argv) {
     build: false,
     label: null,
     keepOpen: false,
+    verify: true,
     query: [],
   };
   for (let i = 2; i < argv.length; i++) {
@@ -94,6 +105,7 @@ function parseArgs(argv) {
     else if (a === '--build') args.build = true;
     else if (a === '--label') args.label = argv[++i];
     else if (a === '--keep-open') args.keepOpen = true;
+    else if (a === '--no-verify') args.verify = false;
     // Repeatable passthrough for module-specific capture overrides, e.g.
     // --query vm=ads --query vmt=0.5 to photograph a viewmodel pose. Each
     // value is parsed as a query fragment rather than a single pair, so an
@@ -147,25 +159,67 @@ export async function startServer(options = {}) {
 }
 
 /**
- * Copies the tree into `.capture-snapshot/` and serves that instead of the
+ * Removes snapshot trees whose owning process is gone.
+ *
+ * A run killed mid-capture never reaches its cleanup, so orphans accumulate.
+ * Liveness is checked per directory rather than clearing them all: deleting a
+ * running capture's tree out from under its Vite server is the failure this
+ * whole mechanism exists to prevent.
+ */
+function reapOrphanSnapshots() {
+  let entries;
+  try {
+    entries = fs.readdirSync(ROOT);
+  } catch {
+    return;
+  }
+
+  for (const name of entries) {
+    const match = /^\.capture-snapshot-(\d+)$/.exec(name);
+    if (!match) continue;
+
+    const pid = Number(match[1]);
+    if (pid === process.pid) continue;
+
+    try {
+      // Signal 0 only probes; EPERM means it exists under another user.
+      process.kill(pid, 0);
+      continue;
+    } catch (err) {
+      if (err.code === 'EPERM') continue;
+    }
+    fs.rmSync(path.join(ROOT, name), { recursive: true, force: true });
+  }
+}
+
+/**
+ * Copies the tree into a private directory and serves that instead of the
  * working directory.
  *
  * Several agents edit continuously, so the live tree is intermittently
  * half-written: a module that throws on load fails the capture no matter how
- * the browser is driven. Hardlinks make the copy near-instant, and because
- * editors write a new file rather than mutating in place, the snapshot keeps
- * the contents it had when the run started.
+ * the browser is driven.
+ *
+ * The directory is per-process. A single shared path defeats the purpose --
+ * concurrent runs rsync --delete into the same place, so one wipes another's
+ * tree underneath a live Vite server.
+ *
+ * The copy is real rather than hardlinked. Hardlinks were near-instant but
+ * rested on the assumption that editors replace a file rather than rewriting
+ * it in place; the agent edit path does write in place, which mutates the
+ * shared inode and changes the "frozen" copy mid-run. The tree is 1.8MB, so
+ * an honest copy costs little and is actually immune to concurrent edits.
  */
 function makeSnapshot() {
-  const dir = path.join(ROOT, '.capture-snapshot');
+  const dir = path.join(ROOT, `.capture-snapshot-${process.pid}`);
+  reapOrphanSnapshots();
   fs.mkdirSync(dir, { recursive: true });
 
   const sources = ['src', 'public', 'index.html', 'vite.config.ts', 'tsconfig.json', 'package.json'];
-  const result = spawnSync(
-    'rsync',
-    ['-a', '--delete', `--link-dest=${ROOT}`, ...sources, `${dir}/`],
-    { cwd: ROOT, encoding: 'utf8' }
-  );
+  const result = spawnSync('rsync', ['-a', '--delete', ...sources, `${dir}/`], {
+    cwd: ROOT,
+    encoding: 'utf8',
+  });
   if (result.status !== 0) {
     throw new Error(`snapshot failed: ${result.stderr || result.stdout}`);
   }
@@ -178,10 +232,43 @@ function makeSnapshot() {
   return dir;
 }
 
-async function startServerOnce({ build = false, snapshot = true } = {}) {
+/**
+ * Type-checks the snapshot before anything is captured from it.
+ *
+ * A copy taken while another agent is mid-edit is internally inconsistent --
+ * one module renamed, its caller not yet updated. The page then boots, throws
+ * on the first frame, and the run reports whatever the symptom happened to be
+ * ("zero fixed steps ran", a black frame) as though it were a real defect in
+ * the subsystem under test. That misattribution is far more expensive than
+ * the few seconds this costs, because it sends an agent chasing a bug that
+ * belongs to someone else and is already gone from the tree.
+ */
+function verifySnapshot(dir) {
+  const started = Date.now();
+  const result = spawnSync('npx', ['tsc', '--noEmit', '-p', 'tsconfig.json'], {
+    cwd: dir,
+    encoding: 'utf8',
+  });
+  if (result.status === 0) return Date.now() - started;
+
+  const errors = (result.stdout || result.stderr || '').trim().split('\n').slice(0, 8);
+  throw new Error(
+    'snapshot does not type-check, so it was captured mid-edit by another ' +
+      'process. This is not a defect in whatever you are testing -- re-run ' +
+      'once the tree settles.\n\n' +
+      errors.map((l) => `  ${l}`).join('\n')
+  );
+}
+
+async function startServerOnce({ build = false, snapshot = true, verify = true } = {}) {
   const port = await findFreePort();
   const mode = build ? 'preview' : 'dev';
   const cwd = snapshot && !build ? makeSnapshot() : ROOT;
+
+  if (cwd !== ROOT && verify) {
+    const ms = verifySnapshot(cwd);
+    process.stdout.write(`  snapshot verified in ${(ms / 1000).toFixed(1)}s\n`);
+  }
 
   if (build) {
     await new Promise((resolve, reject) => {
@@ -228,6 +315,10 @@ async function startServerOnce({ build = false, snapshot = true } = {}) {
             } catch {
               proc.kill('SIGTERM');
             }
+            // Otherwise one snapshot tree accumulates per run. They are
+            // hardlinked so they cost almost nothing on disk, but a hundred
+            // stale copies of src/ make every subsequent search noisy.
+            if (cwd !== ROOT) fs.rmSync(cwd, { recursive: true, force: true });
           },
           get log() {
             return log;
@@ -273,7 +364,7 @@ export async function capture(options = {}) {
   await rm(outDir, { recursive: true, force: true });
   await mkdir(outDir, { recursive: true });
 
-  const server = opts.server ?? (await startServer({ build: opts.build }));
+  const server = opts.server ?? (await startServer({ build: opts.build, verify: opts.verify }));
   const ownsServer = !opts.server;
   const browser = opts.browser ?? (await launchBrowser());
   const ownsBrowser = !opts.browser;
@@ -463,6 +554,12 @@ export async function capture(options = {}) {
       consoleErrors,
     };
     await writeFile(path.join(outDir, 'meta.json'), JSON.stringify(meta, null, 2));
+
+    if (outDir === DEFAULT_OUT) {
+      const link = path.join(ROOT, 'captures', 'latest');
+      await rm(link, { recursive: true, force: true });
+      await symlink(outDir, link, 'dir');
+    }
 
     if (consoleErrors.length > 0) {
       process.stdout.write(`\n  ${consoleErrors.length} console error(s):\n`);
