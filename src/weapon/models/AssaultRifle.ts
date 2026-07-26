@@ -754,19 +754,28 @@ export function buildAssaultRifle(): RifleParts {
     // aperture between the bezels is the only place the world shows through,
     // which is the whole point of a red dot — but the hood around it is a
     // closed box, so the housing reads as mass rather than as a wire frame.
+    //
+    // Sectioned 46 x 44mm around a 31.6mm window, which is a large-window
+    // reflex: a Holosun 510C is 41mm across the body, an EOTech EXPS3 58mm,
+    // and both put roughly 70% of the face inside the glass. The hood was
+    // 43 x 48 around 26.4mm — a 55% window, and taller in section than any
+    // real sight of this type. That ratio, not the overall scale, is what
+    // made it read as a large housing with a small window instead of the
+    // other way round. Widening by 3mm and shortening by 4mm at the same
+    // time keeps the housing's mass while turning it the right way up.
     for (const side of [-1, 1]) {
-      body.add('alloy', roundedBox(0.006, 0.038, 0.062, 0.0035), [side * 0.0185, bodyY, SIGHT_Z]);
+      body.add('alloy', roundedBox(0.006, 0.034, 0.062, 0.0035), [side * 0.02, bodyY, SIGHT_Z]);
     }
-    body.add('alloy', roundedBox(0.043, 0.008, 0.062, 0.0035), [0, bodyY + 0.02, SIGHT_Z]);
-    body.add('alloy', roundedBox(0.043, 0.008, 0.062, 0.0035), [0, bodyY - 0.02, SIGHT_Z]);
-    body.add('alloy', roundedBox(0.043, 0.012, 0.024, 0.004), [0, bodyY - 0.024, SIGHT_Z + 0.004]);
+    body.add('alloy', roundedBox(0.046, 0.008, 0.062, 0.0035), [0, bodyY + 0.018, SIGHT_Z]);
+    body.add('alloy', roundedBox(0.046, 0.008, 0.062, 0.0035), [0, bodyY - 0.018, SIGHT_Z]);
+    body.add('alloy', roundedBox(0.046, 0.012, 0.024, 0.004), [0, bodyY - 0.022, SIGHT_Z + 0.004]);
     // Front and rear face plates: the full housing section with the lens
     // aperture bored through it, rather than a floating ring that leaves the
     // corners of the housing open to the sky. Segment count matters here more
     // than anywhere else on the weapon, since this bore frames the sight
     // picture and fills a quarter of the screen in ADS.
     for (const z of [SIGHT_Z - 0.029, SIGHT_Z + 0.029]) {
-      body.add('alloy', apertureFace(0.043, 0.048, 0.0132, 0.005), [0, bodyY, z]);
+      body.add('alloy', apertureFace(0.046, 0.044, 0.0158, 0.005), [0, bodyY, z]);
     }
     // Bore wall between the plates. The profile closes back on itself so the
     // ring has a real inner surface facing the eye; an open cylinder would
@@ -775,11 +784,11 @@ export function buildAssaultRifle(): RifleParts {
       'rail',
       lathe(
         [
-          [0.0132, 0.0275],
-          [0.0168, 0.0275],
-          [0.0168, -0.0275],
-          [0.0132, -0.0275],
-          [0.0132, 0.0275],
+          [0.0158, 0.0275],
+          [0.019, 0.0275],
+          [0.019, -0.0275],
+          [0.0158, -0.0275],
+          [0.0158, 0.0275],
         ],
         48
       ),
@@ -830,16 +839,16 @@ export function buildAssaultRifle(): RifleParts {
 
     // Elevation on top, windage on the right, battery cap on the left. The
     // caps are tethered by their own bosses so they read as removable parts.
-    turret([0, bodyY + 0.0285, SIGHT_Z + 0.016], [0, 0, 0], 0.0072, 0.011, 12);
-    turret([0.0255, bodyY, SIGHT_Z + 0.016], [0, 0, Math.PI / 2], 0.0072, 0.011, 12);
-    turret([-0.027, bodyY, SIGHT_Z + 0.016], [0, 0, Math.PI / 2], 0.0092, 0.014, 16);
+    turret([0, bodyY + 0.0265, SIGHT_Z + 0.016], [0, 0, 0], 0.0072, 0.011, 12);
+    turret([0.027, bodyY, SIGHT_Z + 0.016], [0, 0, Math.PI / 2], 0.0072, 0.011, 12);
+    turret([-0.0285, bodyY, SIGHT_Z + 0.016], [0, 0, Math.PI / 2], 0.0092, 0.014, 16);
 
     // Brightness rocker below the battery cap: two pads and the dot between.
     for (const dy of [0.011, -0.011]) {
       body.add(
         'rubber',
         roundedBox(0.004, 0.006, 0.006, 0.0015),
-        [-0.0225, bodyY + dy, SIGHT_Z - 0.006],
+        [-0.024, bodyY + dy, SIGHT_Z - 0.006],
         [0, Math.PI / 2, 0]
       );
     }
@@ -855,70 +864,65 @@ export function buildAssaultRifle(): RifleParts {
     for (const z of [SIGHT_Z - 0.0315, SIGHT_Z + 0.0315]) {
       for (const sx of [-1, 1]) {
         for (const sy of [-1, 1]) {
-          screw(sx * 0.0166, bodyY + sy * 0.019, z, 0.0018);
+          screw(sx * 0.0192, bodyY + sy * 0.0176, z, 0.0018);
         }
       }
-    }
-
-    // Raised boss around each aperture. The face plates are the largest flat
-    // areas the player ever sees at ADS, and in the frame they were a plain
-    // dark rectangle with a hole in it. The boss costs one part per face and
-    // buys a lit edge and a cast shadow across the middle of that rectangle,
-    // which is what breaks it up.
-    for (const [z, d] of [
-      [SIGHT_Z - 0.0335, -0.0022],
-      [SIGHT_Z + 0.0335, 0.0022],
-    ]) {
-      body.add('alloy', apertureFace(0.0335, 0.0375, 0.0142, Math.abs(d), 0.0055), [0, bodyY, z + d * 0.5]);
     }
 
     // Clamshell seam: the housing is two castings, and the parting line runs
     // around it just aft of the bezel. Modelled as a recessed dark band
     // rather than a groove, which costs three boxes instead of a boolean.
     for (const side of [-1, 1]) {
-      body.add('rail', roundedBox(0.0016, 0.0405, 0.0035, 0.0006), [side * 0.0207, bodyY, SIGHT_Z + 0.008]);
+      body.add('rail', roundedBox(0.0016, 0.037, 0.0035, 0.0006), [side * 0.0222, bodyY, SIGHT_Z + 0.008]);
     }
-    body.add('rail', roundedBox(0.0365, 0.0016, 0.0035, 0.0006), [0, bodyY + 0.0235, SIGHT_Z + 0.008]);
+    body.add('rail', roundedBox(0.039, 0.0016, 0.0035, 0.0006), [0, bodyY + 0.0215, SIGHT_Z + 0.008]);
 
     // Maker's plate on the left flank, which is the side the camera sees at
     // hip. Three engraved bars stand in for a logo and a serial.
-    body.add('rail', roundedBox(0.0014, 0.011, 0.026, 0.0004), [-0.0212, bodyY - 0.004, SIGHT_Z - 0.006]);
+    body.add('rail', roundedBox(0.0014, 0.011, 0.026, 0.0004), [-0.0227, bodyY - 0.004, SIGHT_Z - 0.006]);
     for (let i = 0; i < 3; i++) {
       body.add(
         'alloy',
         roundedBox(0.0008, 0.0014, 0.0175 - i * 0.004, 0.0003),
-        [-0.0219, bodyY - 0.0008 - i * 0.0035, SIGHT_Z - 0.008],
+        [-0.0234, bodyY - 0.0008 - i * 0.0035, SIGHT_Z - 0.008],
         [0, 0, 0]
       );
     }
 
     // Sunshade lip standing proud of the front bezel, and a matching rear
     // eyepiece ring. Both give the aperture a thickness in silhouette.
+    //
+    // These are the whole of the bezel now. A raised rounded-rect boss used
+    // to sit under each of them, there to break up the flat of the face
+    // plate; with the window opened to 31.6mm the face is 6mm of alloy at
+    // its narrowest and there is no flat left to break up, so the boss was
+    // costing two parts to shadow nothing. The rings absorb its thickness
+    // and sit directly on the plate.
     body.add(
       'alloy',
       lathe(
         [
-          [0.0132, 0.004],
-          [0.0182, 0.004],
-          [0.0176, -0.0012],
-          [0.0132, -0.0022],
+          [0.0158, 0.004],
+          [0.0208, 0.004],
+          [0.0202, -0.0012],
+          [0.0158, -0.0026],
         ],
         40
       ),
-      [0, bodyY, SIGHT_Z - 0.0335]
+      [0, bodyY, SIGHT_Z - 0.0315]
     );
     body.add(
       'rail',
       lathe(
         [
-          [0.0134, 0.0022],
-          [0.0166, 0.0022],
-          [0.0166, -0.0016],
-          [0.0134, -0.0016],
+          [0.016, 0.0026],
+          [0.0192, 0.0026],
+          [0.0192, -0.0016],
+          [0.016, -0.0016],
         ],
         40
       ),
-      [0, bodyY, SIGHT_Z + 0.0332]
+      [0, bodyY, SIGHT_Z + 0.0315]
     );
 
     // Mount clamp: knurled tension nut and a throw lever folded back along
@@ -940,7 +944,7 @@ export function buildAssaultRifle(): RifleParts {
 
   // Lenses stay separate: they are transparent, so they must sort after the
   // opaque body rather than merge into it.
-  const lensGeometry = new THREE.CircleGeometry(0.0129, 48);
+  const lensGeometry = new THREE.CircleGeometry(0.0155, 48);
   const frontLens = new THREE.Mesh(lensGeometry, materials.glass);
   frontLens.position.set(0, SIGHT_Y, SIGHT_Z - 0.026);
   frontLens.rotation.y = Math.PI;

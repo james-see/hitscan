@@ -57,6 +57,11 @@ class ActionEdge {
     if (input.wasPressed(this.action) && input.wasReleased(this.action)) this.#latched = true;
   }
 
+  reset(): void {
+    this.#down = false;
+    this.#latched = false;
+  }
+
   /** Called once per fixed step. */
   poll(input: InputState): { down: boolean; pressed: boolean; released: boolean } {
     const down = input.isDown(this.action);
@@ -145,7 +150,8 @@ export class WeaponModule implements GameModule {
 
     this.#unsubscribe.push(
       ctx.events.on('player:landed', ({ velocity }) => this.#rig.addLandingImpact(velocity)),
-      ctx.events.on('player:jumped', () => this.#rig.addJumpImpulse())
+      ctx.events.on('player:jumped', () => this.#rig.addJumpImpulse()),
+      ctx.events.on('game:restart', () => this.#restart(ctx))
     );
 
     this.#animator.play(DRAW, DRAW_TIME);
@@ -555,6 +561,64 @@ export class WeaponModule implements GameModule {
         ammo: this.#ammo,
       });
     }
+  }
+
+  /**
+   * Re-equips the weapon for a fresh round.
+   *
+   * Without this the second round opened with the first one's magazine and
+   * reserve, and with any reload that was in flight when the round ended still
+   * counting down. The AI, VFX and audio modules already reset on this event;
+   * the weapon owns its own state, so it has to do the same.
+   *
+   * The field of view is released rather than recomputed: `#applyCameraFov`
+   * only writes to the camera while an effect is running, so a round that ends
+   * mid-aim would otherwise strand the aimed value until the next one.
+   */
+  #restart(ctx: EngineContext): void {
+    this.#ammo = this.#definition.magazineSize;
+    this.#reserve = this.#definition.reserveAmmo;
+
+    this.#adsIntent = false;
+    this.#adsProgress = 0;
+    this.#adsEased = 0;
+
+    this.#reloading = false;
+    this.#reloadTimer = 0;
+    this.#reloadDuration = 0;
+    this.#reloadCommit = 0;
+    this.#reloadTactical = false;
+
+    this.#cooldown = 0;
+    this.#semiLatched = false;
+    this.#burstRemaining = 0;
+    this.#shotIndex = 0;
+    this.#sinceFire = Infinity;
+    this.#dryFireTimer = 0;
+    this.#firing = false;
+    this.#triggerPull = 0;
+    this.#sprintWeight = 0;
+
+    this.#recoil.reset();
+    this.#spread.reset();
+    this.#fovKick.reset();
+    this.#shellQueue.length = 0;
+
+    this.#fireEdge.reset();
+    this.#reloadEdge.reset();
+    this.#inspectEdge.reset();
+
+    if (this.#fovOverridden) {
+      ctx.camera.fov = ctx.settings.fov;
+      ctx.camera.updateProjectionMatrix();
+      this.#fovOverridden = false;
+    }
+
+    this.#lastYaw = this.#player?.yaw ?? 0;
+    this.#lastPitch = this.#player?.pitch ?? 0;
+
+    this.#animator.play(DRAW, DRAW_TIME);
+    ctx.events.emit('weapon:equipped', { weaponId: this.#definition.id });
   }
 
   // -- camera ---------------------------------------------------------------

@@ -102,15 +102,20 @@ const SPRINT_POSE = new Pose(0.17, -0.19, -0.45, -0.25, 0.5, 0.45);
  *
  * This is the single most consequential number in the whole viewmodel: with
  * the ADS field of view it sets how much of the screen the optic eats, and
- * therefore whether the player can see a flanker while aiming. The target is
- * a housing about a quarter of the frame tall. Much closer than this and the
- * sight becomes a black frame with a letterbox of scene around it, which is
- * a sight picture only in the sense that a periscope is one.
+ * therefore whether the player can see a flanker while aiming. At this
+ * distance the hood measures a fifth of the frame and the whole optic with
+ * its mount rather under two fifths. Much closer and the sight becomes a
+ * black frame with a letterbox of scene around it, which is a sight picture
+ * only in the sense that a periscope is one.
  *
- * Far longer than a real cheek weld on purpose. Eye relief on an actual
- * reflex sight is 60-80mm, but a viewmodel is rendered through a much
- * narrower lens than the eye, so matching the physical distance magnifies the
- * housing to something no shooter would ship.
+ * Far longer than a real cheek weld, and not as a fudge. Eye relief on an
+ * actual reflex sight is 60-80mm, but the eye sees roughly 120 degrees
+ * vertically where this lens sees 50, and apparent size scales with the ratio
+ * of the half-angle tangents. 70mm of real eye relief through a 50-degree
+ * lens is about 260mm, so 285mm is if anything slightly conservative. Treat
+ * it as the correct distance rather than a knob: if the optic is the wrong
+ * size in frame, the model or the lens is wrong, and pulling the eye back
+ * only hides it.
  */
 const ADS_EYE_DISTANCE = 0.285;
 
@@ -122,13 +127,19 @@ const ADS_EYE_DISTANCE = 0.285;
  * wide enough to fit the whole rifle, narrow enough that the near end of the
  * receiver is not smeared across the frame by perspective.
  *
- * ADS narrows only slightly. The instinct is to narrow it hard for a scoped
- * feel, but the viewmodel FOV does not change what the player sees of the
- * world — only how large the weapon is drawn over it — so a tight ADS FOV
- * buys nothing and costs most of the screen.
+ * ADS does not narrow at all. The old 46 was the last of an instinct to
+ * narrow for a scoped feel, and since the viewmodel FOV does not change what
+ * the player sees of the world, all it did was draw the weapon 9% larger at
+ * exactly the moment it is already closest to the eye — a magnifier applied
+ * to the one pose that could least afford it.
+ *
+ * Widening past the hip value would shrink the optic further and photograph
+ * better still, and it is the wrong thing to do: the weapon would visibly
+ * contract as the player pulls it in to aim, which reads as it retreating.
+ * Equal is the only value that costs nothing in motion.
  */
 const VIEWMODEL_FOV_HIP = 50;
-const VIEWMODEL_FOV_ADS = 46;
+const VIEWMODEL_FOV_ADS = 50;
 
 /** How far ahead to probe for walls, roughly the weapon's length. */
 const COLLISION_PROBE = 0.9;
