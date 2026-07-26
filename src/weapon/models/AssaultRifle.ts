@@ -73,6 +73,43 @@ const SIGHT_Y = BORE_Y + 0.07;
 /** Optic sits over the rear of the upper, where a shooter would clamp it. */
 const SIGHT_Z = 0.024;
 
+/**
+ * Direction from the support wrist toward the elbow, in weapon space.
+ *
+ * This is a composition control as much as an anatomical one. The forearm is
+ * the nearest object to the eye in the whole viewmodel, so wherever it points
+ * it is drawn several times larger than anything on the weapon: aimed close
+ * to straight down it stands as a tan column through the middle of the frame
+ * and buries the handguard and muzzle behind it. Raked out toward the
+ * shooter's left it becomes what it should be, a limb entering the bottom-left
+ * corner and leaving again, with the whole rifle in clear air above it.
+ *
+ * The magnitude of the sideways component is set by that framing rather than
+ * by a shoulder position, and it is not unreasonable anatomically: supporting
+ * a carbine held across the chest genuinely puts the elbow well outboard.
+ */
+const ARM_DIRECTION: readonly [number, number, number] = [-0.72, -0.68, 0.1];
+
+/**
+ * Where the support hand sits on the handguard, as a Z datum.
+ *
+ * Pulled 51mm back from the far-forward hold it started at. Forward is the
+ * better-looking grip in isolation and the one a shooter would actually use,
+ * but at hip the weapon points close to away from the camera, so the last
+ * 170mm of handguard, barrel and flash hider project into about 25 pixels of
+ * frame width — and the hand was sitting on top of all of it. Every
+ * millimetre the hand moves back is a millimetre of front end that clears its
+ * silhouette, which is the difference between a muzzle device you can
+ * identify and a dark stub.
+ */
+const GRIP_Z = -0.17;
+
+/** Scales a vector to unit length. */
+function normalise(v: readonly [number, number, number]): [number, number, number] {
+  const length = Math.hypot(v[0], v[1], v[2]) || 1;
+  return [v[0] / length, v[1] / length, v[2] / length];
+}
+
 export interface RifleParts {
   root: THREE.Group;
   /** Detachable magazine, animated during reloads. */
@@ -350,11 +387,17 @@ export function buildAssaultRifle(): RifleParts {
   // flank, and the brass deflector bump behind it.
   {
     const portZ = -0.012;
-    body.add('rubber', roundedBox(0.006, 0.026, 0.058, 0.002), [0.0163, BORE_Y + 0.006, portZ]);
-    body.add('steel', roundedBox(0.005, 0.019, 0.05, 0.0015), [0.0166, BORE_Y + 0.005, portZ]);
+    // Raised boss, then the port itself sunk 1mm into it. Depth has to come
+    // from the step between the two: with both at the same height the port
+    // reads as a painted rectangle, which is what the receiver's flank looked
+    // like before.
+    body.add('alloy', roundedBox(0.009, 0.03, 0.062, 0.003), [0.0141, BORE_Y + 0.006, portZ]);
+    body.add('rubber', roundedBox(0.006, 0.024, 0.054, 0.002), [0.0146, BORE_Y + 0.006, portZ]);
+    body.add('steel', roundedBox(0.005, 0.018, 0.048, 0.0015), [0.0144, BORE_Y + 0.005, portZ]);
     // Dust cover, hanging open below the port on its hinge rod.
-    body.add('alloy', roundedBox(0.005, 0.026, 0.056, 0.0022), [0.0198, BORE_Y - 0.012, portZ], [0.0, 0, 0.5]);
-    body.add('steel', tube(0.0022, 0.0022, 0.062, 10), [0.0186, BORE_Y - 0.011, portZ], [0, Math.PI / 2, 0]);
+    body.add('alloy', roundedBox(0.005, 0.028, 0.058, 0.0022), [0.0206, BORE_Y - 0.013, portZ], [0.0, 0, 0.42]);
+    body.add('rubber', roundedBox(0.0036, 0.024, 0.05, 0.002), [0.0186, BORE_Y - 0.013, portZ], [0.0, 0, 0.42]);
+    body.add('steel', tube(0.0022, 0.0022, 0.064, 10), [0.0184, BORE_Y - 0.0075, portZ], [0, Math.PI / 2, 0]);
     // Brass deflector: the wedge aft of the port that keeps cases off a
     // left-handed shooter's face.
     body.add('alloy', roundedBox(0.011, 0.021, 0.03, 0.005), [0.0196, BORE_Y + 0.009, portZ + 0.044], [0, 0, -0.3]);
@@ -393,9 +436,15 @@ export function buildAssaultRifle(): RifleParts {
     body.add('alloy', roundedBox(0.0298, 0.02, 0.026, 0.005), [0, BORE_Y - 0.017, wellZ + 0.036]);
     body.add('alloy', roundedBox(0.01, 0.016, 0.017, 0.004), [0.017, BORE_Y - 0.021, wellZ + 0.036]);
     body.add('steel', tube(0.0055, 0.0055, 0.008, 16), [0.0225, BORE_Y - 0.021, wellZ + 0.036], [0, Math.PI / 2, 0]);
-    // Bolt catch on the left flank: paddle, shelf and pivot.
-    body.add('steel', roundedBox(0.005, 0.011, 0.03, 0.002), [-0.0172, BORE_Y - 0.02, wellZ + 0.036], [0, 0, 0.1]);
-    body.add('steel', roundedBox(0.005, 0.017, 0.011, 0.002), [-0.0176, BORE_Y - 0.023, wellZ + 0.047]);
+    // Bolt catch. This one gets a generous read: a right-handed shooter's eye
+    // sits to the left of the weapon, so the left flank is the side the hip
+    // pose actually shows and the ejection port, forward assist and deflector
+    // opposite it are all facing away. The catch and the selector are what
+    // carry that side.
+    body.add('alloy', roundedBox(0.008, 0.019, 0.042, 0.003), [-0.0158, BORE_Y - 0.021, wellZ + 0.038]);
+    body.add('steel', roundedBox(0.0055, 0.0125, 0.034, 0.002), [-0.0206, BORE_Y - 0.02, wellZ + 0.036], [0, 0, 0.12]);
+    body.add('steel', roundedBox(0.0058, 0.021, 0.013, 0.002), [-0.021, BORE_Y - 0.024, wellZ + 0.05]);
+    body.add('steel', tube(0.0022, 0.0022, 0.006, 10), [-0.0198, BORE_Y - 0.017, wellZ + 0.021], [0, Math.PI / 2, 0]);
   }
   // Takedown and pivot pins, at the published 161.9mm spacing.
   for (const z of [PIN_REAR_Z, PIN_FRONT_Z]) {
@@ -433,7 +482,7 @@ export function buildAssaultRifle(): RifleParts {
     guard.computeVertexNormals();
     // Extruded across the receiver: the profile's +X becomes the weapon's
     // rearward axis, so the loop sits behind the magwell around the trigger.
-    body.add('alloy', guard, [0.00575, BORE_Y - 0.046, TRIGGER_Z - 0.001], [0, -Math.PI / 2, 0]);
+    body.add('alloy', guard, [0.00575, BORE_Y - 0.046, TRIGGER_Z - 0.021], [0, -Math.PI / 2, 0]);
   }
   // Safety selector: the shaft through the receiver with a lever both sides.
   {
@@ -445,6 +494,16 @@ export function buildAssaultRifle(): RifleParts {
       // Lever swept back and down to SAFE, with a thumb pad on its end.
       body.add('polymer', roundedBox(0.0055, 0.0092, 0.026, 0.002), [side * 0.0212, selY - 0.005, selZ + 0.009], [-0.5, 0, 0]);
       body.add('polymer', roundedBox(0.0075, 0.008, 0.009, 0.002), [side * 0.0218, selY - 0.0135, selZ + 0.0205], [-0.5, 0, 0]);
+      // Fire-selector index marks around the shaft: SAFE, SEMI, AUTO.
+      for (let i = 0; i < 3; i++) {
+        const a = -1.15 + i * 1.15;
+        body.add(
+          'rail',
+          roundedBox(0.003, 0.0055, 0.0016, 0.0004),
+          [side * 0.0182, selY + Math.cos(a) * 0.0125, selZ + Math.sin(a) * 0.0125],
+          [-a, Math.PI / 2, 0]
+        );
+      }
     }
   }
 
@@ -485,41 +544,105 @@ export function buildAssaultRifle(): RifleParts {
   }
 
   // -- stock ----------------------------------------------------------------
+  //
+  // A carbine stock is three things in silhouette: a tube on the bore line, a
+  // body that slides on it, and a pad square to the shoulder. The previous
+  // one had all its parts but none of that reading — the comb, the sling loop
+  // and four separate pad ribs each stood off the body with a gap around it,
+  // so the rear of the weapon came out as a cluster of rectangular prongs.
+  // Here the pad is one wedge with grooves cut into its face, the comb is
+  // continuous with the body, and nothing floats.
   {
-    const tubeStart = RECEIVER_BACK + 0.018;
-    body.add('alloy', roundedBox(0.042, 0.042, 0.016, 0.004), [0, BORE_Y + 0.004, tubeStart - 0.006]);
-    body.add('steel', tube(0.0185, 0.0185, 0.014, 28), [0, BORE_Y + 0.004, tubeStart + 0.008]);
-    body.add('steel', tube(0.0158, 0.0158, 0.135, 32), [0, BORE_Y + 0.004, tubeStart + 0.066]);
-    // Length-of-pull detents.
-    for (let i = 0; i < 4; i++) {
+    const tubeY = BORE_Y + 0.002;
+    // Receiver end plate and castle nut, where the tube meets the lower.
+    body.add('alloy', roundedBox(0.0296, 0.042, 0.005, 0.003), [0, tubeY, RECEIVER_BACK + 0.003]);
+    body.add('steel', tube(0.0175, 0.0175, 0.013, 20), [0, tubeY, RECEIVER_BACK + 0.012]);
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
       body.add(
         'steel',
-        tube(0.0168, 0.0168, 0.004, 28),
-        [0, BORE_Y + 0.004, tubeStart + 0.03 + i * 0.026]
+        roundedBox(0.0035, 0.0035, 0.013, 0.0008),
+        [Math.cos(a) * 0.0168, tubeY + Math.sin(a) * 0.0168, RECEIVER_BACK + 0.012]
       );
     }
-    // Sliding stock body, run all the way in to its shortest length of pull.
-    //
-    // This is a framing decision as much as a loadout one. The stock is the
-    // part of the weapon nearest the eye at hip, so every millimetre of length
-    // of pull costs several times its share of the frame, and fully extended
-    // it filled the entire right third with a featureless slab. Collapsed, it
-    // tucks into the corner where a carbine's stock belongs.
-    const sz = tubeStart + 0.076;
-    body.add('polymer', roundedBox(0.047, 0.058, 0.115, 0.008, 3), [0, BORE_Y + 0.002, sz]);
-    // Comb, cheek rest and the toe that hooks under the shoulder.
-    body.add('polymer', roundedBox(0.036, 0.014, 0.1, 0.005), [0, BORE_Y + 0.033, sz + 0.004]);
-    body.add('polymer', roundedBox(0.04, 0.05, 0.03, 0.006), [0, BORE_Y - 0.038, sz + 0.036], [0.28, 0, 0]);
-    // Sling loop and release lever.
-    body.add('polymer', roundedBox(0.052, 0.012, 0.02, 0.004), [0, BORE_Y - 0.028, sz - 0.05], [-0.2, 0, 0]);
-    body.add('rubber', roundedBox(0.049, 0.078, 0.014, 0.006), [0, BORE_Y - 0.004, sz + 0.062], [0.1, 0, 0]);
-    // Butt pad ribs.
-    for (let i = 0; i < 4; i++) {
+    // Buffer tube: 29.2mm across, running to BUFFER_END.
+    const tubeFrom = RECEIVER_BACK + 0.018;
+    const tubeLength = BUFFER_END - tubeFrom;
+    body.add('steel', tube(0.0146, 0.0146, tubeLength, 28), [0, tubeY, tubeFrom + tubeLength / 2]);
+    // Length-of-pull detent ridges along the underside of the tube.
+    for (let i = 0; i < 6; i++) {
       body.add(
-        'rubber',
-        roundedBox(0.05, 0.005, 0.006, 0.002),
-        [0, BORE_Y + 0.028 - i * 0.018, sz + 0.069],
-        [0.1, 0, 0]
+        'steel',
+        roundedBox(0.011, 0.005, 0.009, 0.0015),
+        [0, tubeY - 0.0155, tubeFrom + 0.022 + i * 0.0245]
+      );
+    }
+    body.add('steel', roundedBox(0.013, 0.008, tubeLength - 0.02, 0.002), [0, tubeY - 0.0155, tubeFrom + tubeLength / 2]);
+
+    // Sliding body, collapsed to its shortest length of pull. This is a
+    // framing decision as much as a loadout one: the stock is the part of the
+    // weapon nearest the eye at hip, so every millimetre of pull costs
+    // several times its share of the frame.
+    //
+    // The body is 165mm long, which is longer than it looks: collapsed, its
+    // nose reaches all the way to the castle nut and its tail overhangs the
+    // rear of the tube. Building it short left 60mm of naked buffer tube
+    // between the receiver and the stock, which is a position no carbine can
+    // actually be in and is a large part of why the rear of the weapon read
+    // as loose parts. The nose is a slim collar rather than full section, so
+    // the tube still shows above and below it.
+    const sz = BUTT_Z - 0.061;
+    body.add('polymer', roundedBox(0.0432, 0.056, 0.104, 0.007, 3), [0, tubeY + 0.001, sz]);
+    body.add('polymer', roundedBox(0.0376, 0.038, 0.062, 0.006, 3), [0, tubeY + 0.001, sz - 0.082]);
+    body.add('polymer', roundedBox(0.0408, 0.046, 0.022, 0.006, 3), [0, tubeY + 0.001, sz - 0.05]);
+    // Comb: a raised cheek weld that tapers into the body at its front, which
+    // is the line that says "stock" rather than "block".
+    body.add('polymer', roundedBox(0.0324, 0.02, 0.096, 0.006, 3), [0, tubeY + 0.032, sz + 0.006]);
+    body.add('polymer', roundedBox(0.0324, 0.016, 0.03, 0.006, 3), [0, tubeY + 0.026, sz - 0.045], [0.34, 0, 0]);
+    // Cheek pad inset into the comb's left face, where a face actually goes.
+    for (const side of [-1, 1]) {
+      body.add('rubber', roundedBox(0.0035, 0.014, 0.062, 0.004), [side * 0.0158, tubeY + 0.032, sz + 0.012]);
+    }
+    // Lightening cuts in the flanks.
+    //
+    // At hip the stock is the nearest and therefore the largest thing on
+    // screen, so a 165mm slab of unbroken polymer dominates the frame however
+    // correct its outline is. The real part is hollow and cut away, and those
+    // cuts are what stop it reading as a block: a long recess over the tube
+    // channel, a smaller one behind it, and the ridge between them.
+    // The dark panels sit flush with the flank and the ribs stand 2mm proud
+    // of it. Both at the same height reads as decal rather than relief, which
+    // is what the first attempt did.
+    for (const side of [-1, 1]) {
+      body.add('rubber', roundedBox(0.0392, 0.026, 0.05, 0.006), [0, tubeY + 0.002, sz - 0.014]);
+      body.add('rubber', roundedBox(0.0392, 0.022, 0.03, 0.006), [0, tubeY - 0.001, sz + 0.036]);
+      body.add('polymer', roundedBox(0.0464, 0.008, 0.104, 0.002), [0, tubeY + 0.019, sz]);
+      body.add('polymer', roundedBox(0.0464, 0.009, 0.104, 0.002), [0, tubeY - 0.019, sz], [0.06, 0, 0]);
+      body.add('polymer', roundedBox(0.0452, 0.03, 0.008, 0.002), [side * 0.0006, tubeY + 0.001, sz + 0.016]);
+    }
+    // Sling slot cut clean through the body behind the comb, which is the one
+    // opening on a carbine stock that is unmistakably a hole.
+    body.add('rubber', roundedBox(0.0464, 0.019, 0.014, 0.004), [0, tubeY + 0.004, sz + 0.033]);
+    // Toe: the hook under the pad that a shooter pulls into the shoulder.
+    body.add('polymer', roundedBox(0.0324, 0.036, 0.026, 0.007, 3), [0, tubeY - 0.036, sz + 0.036], [0.22, 0, 0]);
+    // Adjustment lever slung under the body, and the ambidextrous sling loop
+    // cut through its front corner.
+    body.add('polymer', roundedBox(0.0356, 0.014, 0.05, 0.005), [0, tubeY - 0.03, sz - 0.016], [-0.1, 0, 0]);
+    body.add('rubber', roundedBox(0.0378, 0.008, 0.024, 0.003), [0, tubeY - 0.037, sz - 0.028], [-0.1, 0, 0]);
+    for (const side of [-1, 1]) {
+      body.add('polymer', roundedBox(0.006, 0.03, 0.014, 0.004), [side * 0.0208, tubeY - 0.014, sz - 0.04]);
+    }
+
+    // Butt pad: one solid rubber wedge canted to the shoulder, with the
+    // grooves cut into its face instead of stacked slats standing off it.
+    const padZ = BUTT_Z - 0.008;
+    body.add('rubber', roundedBox(0.0416, 0.076, 0.016, 0.005, 3), [0, tubeY - 0.004, padZ], [0.14, 0, 0]);
+    for (let i = 0; i < 3; i++) {
+      body.add(
+        'polymer',
+        roundedBox(0.0424, 0.004, 0.006, 0.0012),
+        [0, tubeY + 0.02 - i * 0.021, padZ + 0.0064 + (0.02 - i * 0.021) * 0.14],
+        [0.14, 0, 0]
       );
     }
   }
@@ -529,59 +652,79 @@ export function buildAssaultRifle(): RifleParts {
     const length = RECEIVER_FRONT - HANDGUARD_FRONT;
     const centre = (RECEIVER_FRONT + HANDGUARD_FRONT) / 2;
     // Barrel nut collar at the receiver joint.
-    body.add('alloy', tube(0.0315, 0.0315, 0.022, 32), [0, BORE_Y, RECEIVER_FRONT - 0.012]);
+    body.add('alloy', tube(0.029, 0.029, 0.02, 32), [0, BORE_Y, RECEIVER_FRONT - 0.011]);
     // Octagonal free-float tube; the flats catch the key light and give the
     // handguard a machined read that a smooth cylinder does not.
-    const hg = tube(HANDGUARD_RADIUS, HANDGUARD_RADIUS, length - 0.024, 8, false);
+    const hg = tube(HANDGUARD_RADIUS, HANDGUARD_RADIUS, length - 0.022, 8, false);
     hg.rotateZ(Math.PI / 8);
-    body.add('rail', hg, [0, BORE_Y, centre - 0.012], [0, 0, 0], [1, 1, 1], true);
-    addRail(body, RECEIVER_FRONT + 0.002, HANDGUARD_FRONT + 0.008, RAIL_TOP - 0.005);
+    body.add('rail', hg, [0, BORE_Y, centre - 0.011], [0, 0, 0], [1, 1, 1], true);
+    addRail(body, RECEIVER_FRONT + 0.002, HANDGUARD_FRONT + 0.006, RAIL_TOP);
 
-    addMlokSlots(body, Math.PI / 2, [-0.2, -0.245, -0.29, -0.335]);
-    addMlokSlots(body, -Math.PI / 2, [-0.2, -0.245, -0.29, -0.335]);
-    addMlokSlots(body, Math.PI, [-0.2, -0.245, -0.29]);
+    const slots = [-0.115, -0.16, -0.205, -0.25, -0.295];
+    addMlokSlots(body, Math.PI / 2, slots);
+    addMlokSlots(body, -Math.PI / 2, slots);
+    addMlokSlots(body, Math.PI, slots.slice(0, 4));
     // QD sling socket.
-    body.add('steel', tube(0.007, 0.007, 0.008, 12), [-0.026, BORE_Y - 0.012, -0.38], [0, Math.PI / 2, 0]);
+    body.add('steel', tube(0.0062, 0.0062, 0.007, 12), [-0.0245, BORE_Y - 0.011, -0.31], [0, Math.PI / 2, 0]);
     // Handstop, which also reads as the front of the silhouette from the side.
-    body.add('polymer', roundedBox(0.026, 0.03, 0.036, 0.006), [0, BORE_Y - 0.038, -0.318], [0.45, 0, 0]);
-    body.add('rubber', roundedBox(0.028, 0.006, 0.03, 0.003), [0, BORE_Y - 0.051, -0.312], [0.45, 0, 0]);
+    body.add('polymer', roundedBox(0.024, 0.03, 0.034, 0.006), [0, BORE_Y - 0.031, -0.262], [0.45, 0, 0]);
+    body.add('rubber', roundedBox(0.026, 0.006, 0.028, 0.003), [0, BORE_Y - 0.044, -0.257], [0.45, 0, 0]);
+    // Front sight, folded flat on the rail. Deployed it would sit in the red
+    // dot's aperture; folded it still puts the tower and its hinge in the
+    // silhouette, which is what the muzzle end of the weapon was missing.
+    body.add('steel', roundedBox(0.019, 0.011, 0.026, 0.002), [0, RAIL_TOP + 0.005, HANDGUARD_FRONT + 0.026]);
+    body.add('steel', roundedBox(0.014, 0.008, 0.022, 0.002), [0, RAIL_TOP + 0.011, HANDGUARD_FRONT + 0.033], [0.5, 0, 0]);
+    body.add('steel', tube(0.0026, 0.0026, 0.021, 10), [0, RAIL_TOP + 0.006, HANDGUARD_FRONT + 0.038], [0, Math.PI / 2, 0]);
   }
 
   // -- barrel and muzzle device --------------------------------------------
-  body.add('steel', tube(0.0115, 0.0115, 0.32, 32), [0, BORE_Y, (RECEIVER_FRONT + BARREL_END) / 2]);
-  body.add('steel', tube(0.0135, 0.0135, 0.012, 28), [0, BORE_Y, HANDGUARD_FRONT - 0.008]);
-  // Gas block peeking out under the handguard lip.
-  body.add('steel', roundedBox(0.022, 0.024, 0.03, 0.003), [0, BORE_Y + 0.002, -0.408]);
+  {
+    // One tube from the barrel nut to the crown. It used to be built to a
+    // separate BARREL_END that no longer matched the muzzle device, leaving a
+    // 25mm hole in the weapon that a perspective viewmodel shot never showed.
+    const from = RECEIVER_FRONT - 0.004;
+    body.add('steel', tube(0.0098, 0.0098, from - BARREL_END, 28), [0, BORE_Y, (from + BARREL_END) / 2]);
+    // Low-profile gas block under the rail, at the carbine gas port.
+    body.add('steel', roundedBox(0.019, 0.021, 0.032, 0.003), [0, BORE_Y + 0.002, RECEIVER_FRONT - 0.19]);
+    body.add('steel', tube(0.0062, 0.0062, 0.048, 16), [0, BORE_Y + 0.0125, RECEIVER_FRONT - 0.166]);
+    // Shoulder and thread relief where the muzzle device screws on.
+    body.add('steel', tube(0.0112, 0.0112, 0.01, 24), [0, BORE_Y, HANDGUARD_FRONT - 0.006]);
+    body.add('steel', tube(0.0088, 0.0088, 0.014, 20), [0, BORE_Y, BARREL_END + 0.007]);
+  }
   {
     const z = (BARREL_END + MUZZLE_END) / 2;
+    // A2 birdcage: a knurled rear collar, a slotted cage and a tapered nose.
+    // Profile runs +Z (rearward) to -Z, spanning exactly BARREL_END to
+    // MUZZLE_END so the barrel and the device meet with no seam.
     body.add(
       'steel',
       lathe(
         [
-          [0.0125, 0.0275],
-          [0.0155, 0.024],
-          [0.0155, 0.012],
-          [0.0132, 0.008],
-          [0.0155, 0.002],
-          [0.0155, -0.012],
-          [0.0132, -0.016],
-          [0.0155, -0.021],
-          [0.0155, -0.0265],
-          [0.0092, -0.0275],
+          [0.0092, 0.022],
+          [0.0128, 0.0212],
+          [0.0128, 0.0135],
+          [0.0112, 0.013],
+          [0.0112, 0.0075],
+          [0.0128, 0.007],
+          [0.0128, -0.0135],
+          [0.0122, -0.0185],
+          [0.0104, -0.022],
+          [0.0072, -0.022],
         ],
         36
       ),
       [0, BORE_Y, z]
     );
     // Crown: a dark disc set back inside the bore so the muzzle reads hollow.
-    body.add('rubber', tube(0.0085, 0.0085, 0.001, 28), [0, BORE_Y, MUZZLE_END + 0.004]);
-    // Birdcage ports.
+    body.add('rubber', tube(0.0066, 0.0066, 0.001, 28), [0, BORE_Y, MUZZLE_END + 0.005]);
+    // Birdcage slots, five of them open at the top and sides and closed
+    // underneath, which is what stops an A2 kicking dust off the ground.
     for (let i = 0; i < 5; i++) {
-      const a = -Math.PI / 2 + (i - 2) * 0.5;
+      const a = Math.PI / 2 + (i - 2) * 0.62;
       body.add(
         'rubber',
-        roundedBox(0.004, 0.005, 0.016, 0.0008),
-        [Math.cos(a) * 0.0145, BORE_Y + Math.sin(a) * 0.0145, z - 0.004],
+        roundedBox(0.0032, 0.0045, 0.017, 0.0007),
+        [Math.cos(a) * 0.012, BORE_Y + Math.sin(a) * 0.012, z - 0.0015],
         [0, 0, a - Math.PI / 2]
       );
     }
@@ -589,13 +732,21 @@ export function buildAssaultRifle(): RifleParts {
 
   // -- optic ----------------------------------------------------------------
   {
-    const mountY = RAIL_TOP + 0.005;
-    body.add('rail', roundedBox(0.03, 0.012, 0.07, 0.003), [0, mountY, SIGHT_Z]);
-    body.add('rail', roundedBox(0.038, 0.01, 0.016, 0.003), [0, RAIL_TOP - 0.001, SIGHT_Z + 0.02]);
-    body.add('rail', roundedBox(0.038, 0.01, 0.016, 0.003), [0, RAIL_TOP - 0.001, SIGHT_Z - 0.02]);
-    // Cross-bolt clamp nuts.
-    for (const z of [SIGHT_Z + 0.02, SIGHT_Z - 0.02]) {
-      body.add('steel', tube(0.006, 0.006, 0.009, 6), [0.021, RAIL_TOP - 0.001, z], [0, Math.PI / 2, 0]);
+    // Riser mount. With the rail dropped to its real 31mm over the bore and
+    // the optic at a lower-third co-witness, there are 39mm to bridge, so
+    // this is a proper cantilever mount rather than the low ring the previous
+    // over-tall rail could get away with: a clamp foot on the rail, a
+    // vertical post, and a saddle carrying the housing.
+    const mountY = RAIL_TOP + 0.006;
+    body.add('rail', roundedBox(0.0294, 0.012, 0.062, 0.003), [0, mountY, SIGHT_Z]);
+    body.add('rail', roundedBox(0.026, 0.028, 0.05, 0.004, 3), [0, mountY + 0.018, SIGHT_Z]);
+    body.add('rail', roundedBox(0.0336, 0.011, 0.05, 0.003), [0, SIGHT_Y - 0.022, SIGHT_Z]);
+    // Clamp jaws either side of the rail with their cross-bolt nuts.
+    for (const z of [SIGHT_Z + 0.021, SIGHT_Z - 0.021]) {
+      body.add('rail', roundedBox(0.0368, 0.014, 0.014, 0.003), [0, RAIL_TOP - 0.005, z]);
+      body.add('steel', tube(0.0052, 0.0052, 0.008, 6), [0.0198, RAIL_TOP - 0.005, z], [0, Math.PI / 2, 0]);
+      // Throw lever on the shooter's left, folded back along the mount.
+      body.add('steel', roundedBox(0.0055, 0.01, 0.024, 0.0022), [-0.0206, RAIL_TOP - 0.006, z + 0.008], [0.1, 0, 0]);
     }
 
     const bodyY = SIGHT_Y;
@@ -833,45 +984,75 @@ export function buildAssaultRifle(): RifleParts {
   halo.position.set(0, 0, 0.0001);
 
   // -- magazine (animated) --------------------------------------------------
+  //
+  // A 30-round STANAG box: 23mm across the inside, 36mm front to back, and
+  // 197mm from feed lips to floor plate along a 254mm curve. Two things make
+  // it read at a glance and both were missing. The first is the curve — the
+  // old one stepped through 20 degrees of rake in eight straight facets, so
+  // it came out as a stick leaning forward rather than a box that bends. The
+  // second is that its widest face has to be the one the player sees: the
+  // side ribs stacked eight horizontal welts down the flank and the whole
+  // thing read as a section of ladder.
   const magazine = new THREE.Group();
   magazine.name = 'magazine';
-  magazine.position.set(0, 0.012, -0.038);
+  magazine.position.set(0, BORE_Y - 0.025, RECEIVER_FRONT + 0.041);
+  magazine.rotation.x = 0.09;
   {
     const mag = new GeometryBuilder();
-    const segments = 8;
-    const segLength = 0.0235;
+    const segments = 11;
+    const segLength = 0.0178;
+    /**
+     * Total sweep from feed lips to floor plate, about 15 degrees over the
+     * body's 196mm, which is a curve radius near 750mm. Worth stating because
+     * the figure usually quoted for a magazine curve is a 10in radius, and
+     * building to that bends a 30-round box through 44 degrees — the result
+     * is a banana that leans out of the magwell rather than a rifle magazine.
+     */
+    const step = 0.262 / segments;
+    const width = 0.0248;
     let y = 0;
     let z = 0;
     let angle = 0;
     for (let i = 0; i < segments; i++) {
       const cy = y - (Math.cos(angle) * segLength) / 2;
       const cz = z - (Math.sin(angle) * segLength) / 2;
-      const width = 0.0262;
-      mag.add('polymer', roundedBox(width, segLength + 0.001, 0.0405, 0.003), [0, cy, cz], [angle, 0, 0]);
-      // Grip ribs down both sides.
-      if (i > 0 && i < segments) {
-        for (const side of [-1, 1]) {
-          mag.add(
-            'polymer',
-            roundedBox(0.0022, 0.016, 0.03, 0.001),
-            [side * (width / 2), cy, cz],
-            [angle, 0, 0]
-          );
-        }
+      // Depth grows toward the floor plate, as it does on the real box.
+      const depth = 0.0358 + i * 0.0006;
+      mag.add('polymer', roundedBox(width, segLength + 0.0012, depth, 0.0025), [0, cy, cz], [angle, 0, 0]);
+      // A single rib down the spine and the front face rather than a stack of
+      // welts across the flank: they run with the curve and describe it.
+      for (const [dz, w] of [
+        [depth / 2, 0.014],
+        [-depth / 2, 0.01],
+      ]) {
+        mag.add(
+          'polymer',
+          roundedBox(w, segLength + 0.0012, 0.0022, 0.0007),
+          [0, cy + Math.sin(angle) * dz, cz + Math.cos(angle) * dz],
+          [angle, 0, 0]
+        );
       }
       y -= Math.cos(angle) * segLength;
       z -= Math.sin(angle) * segLength;
-      angle += 0.042;
+      angle += step;
     }
-    // Feed lips and the follower visible at the top.
-    mag.add('polymer', roundedBox(0.029, 0.012, 0.043, 0.002), [0, 0.006, 0]);
-    mag.add('steel', roundedBox(0.021, 0.005, 0.032, 0.001), [0, 0.009, -0.001]);
-    // Floor plate.
-    mag.add('polymer', roundedBox(0.031, 0.011, 0.046, 0.003), [0, y + 0.004, z], [angle, 0, 0]);
-    mag.add('rubber', roundedBox(0.0325, 0.006, 0.048, 0.003), [0, y - 0.002, z], [angle, 0, 0]);
-    // Witness holes.
-    for (let i = 0; i < 3; i++) {
-      mag.add('rubber', roundedBox(0.005, 0.005, 0.004, 0.001), [0.0132, -0.05 - i * 0.035, -0.004]);
+    // Feed lips, the exposed round beneath them and the follower's tab.
+    mag.add('polymer', roundedBox(0.0262, 0.014, 0.0372, 0.002), [0, 0.005, 0.0005]);
+    mag.add('brass', tube(0.0028, 0.0028, 0.03, 12), [0, 0.0075, 0.0], [0, Math.PI / 2, 0.02]);
+    mag.add('rubber', roundedBox(0.019, 0.004, 0.026, 0.001), [0, 0.0105, 0.0]);
+    // Floor plate: a flared lip with the rubber base pad under it.
+    mag.add('polymer', roundedBox(width + 0.0044, 0.0075, 0.0424, 0.002), [0, y + 0.002, z], [angle, 0, 0]);
+    mag.add('rubber', roundedBox(width + 0.0052, 0.0075, 0.0432, 0.0025), [0, y - 0.005, z], [angle, 0, 0]);
+    // Witness windows down the spine, stepped along the curve.
+    for (let i = 0; i < 4; i++) {
+      const t = 0.035 + i * 0.036;
+      const a = t / 0.254;
+      mag.add(
+        'rubber',
+        roundedBox(0.0058, 0.011, 0.005, 0.0012),
+        [0.0126, -t * Math.cos(a / 2), -t * Math.sin(a / 2) + 0.014],
+        [a, 0, 0]
+      );
     }
     mag.build(magazine, materials, 'mag_', 30);
   }
@@ -881,15 +1062,15 @@ export function buildAssaultRifle(): RifleParts {
   const chargingHandle = new THREE.Group();
   chargingHandle.name = 'charging_handle';
   {
+    // Latch wings at the rear face of the upper, tucked under the flat-top
+    // deck where the real handle sits rather than floating above it.
+    const chY = BORE_Y + 0.0165;
     const ch = new GeometryBuilder();
-    ch.add('alloy', roundedBox(0.052, 0.011, 0.016, 0.003), [0, BORE_Y + 0.03, RECEIVER_BACK + 0.012]);
-    ch.add('alloy', roundedBox(0.02, 0.009, 0.014, 0.003), [-0.03, BORE_Y + 0.03, RECEIVER_BACK + 0.008], [0, 0, 0.25]);
+    ch.add('alloy', roundedBox(0.044, 0.009, 0.013, 0.0025), [0, chY, RECEIVER_BACK + 0.005]);
+    ch.add('alloy', roundedBox(0.018, 0.008, 0.011, 0.0025), [-0.026, chY, RECEIVER_BACK + 0.002], [0, 0, 0.25]);
+    ch.add('steel', roundedBox(0.0056, 0.0035, 0.008, 0.001), [-0.031, chY, RECEIVER_BACK - 0.002]);
     for (const side of [-1, 1]) {
-      ch.add('steel', roundedBox(0.007, 0.007, 0.075, 0.001), [
-        side * 0.014,
-        BORE_Y + 0.03,
-        RECEIVER_BACK - 0.03,
-      ]);
+      ch.add('steel', roundedBox(0.0062, 0.006, 0.062, 0.001), [side * 0.0115, chY, RECEIVER_BACK - 0.034]);
     }
     ch.build(chargingHandle, materials, 'ch_', 30);
   }
@@ -900,8 +1081,8 @@ export function buildAssaultRifle(): RifleParts {
   bolt.name = 'bolt';
   {
     const bg = new GeometryBuilder();
-    bg.add('steel', roundedBox(0.019, 0.021, 0.046, 0.002), [0.0195, 0.053, -0.028]);
-    bg.add('brass', tube(0.0028, 0.0028, 0.012, 8), [0.0205, 0.0485, -0.014], [0, Math.PI / 2, 0.2]);
+    bg.add('steel', roundedBox(0.014, 0.019, 0.044, 0.002), [0.0125, BORE_Y + 0.005, -0.018]);
+    bg.add('brass', tube(0.0028, 0.0028, 0.012, 8), [0.0135, BORE_Y, -0.004], [0, Math.PI / 2, 0.2]);
     bg.build(bolt, materials, 'bolt_', 30);
   }
   root.add(bolt);
@@ -909,7 +1090,7 @@ export function buildAssaultRifle(): RifleParts {
   // -- trigger (animated) ---------------------------------------------------
   const trigger = new THREE.Group();
   trigger.name = 'trigger';
-  trigger.position.set(0, 0.006, 0.021);
+  trigger.position.set(0, BORE_Y - 0.039, TRIGGER_Z);
   {
     const tg = new GeometryBuilder();
     tg.add('steel', roundedBox(0.0075, 0.026, 0.009, 0.002), [0, -0.014, 0.001], [0.25, 0, 0]);
@@ -926,7 +1107,7 @@ export function buildAssaultRifle(): RifleParts {
   supportHand.name = 'support_hand';
   {
     const hand = new GeometryBuilder();
-    const gripZ = -0.283;
+    const gripZ = GRIP_Z;
     /** Radius the glove sits at: the handguard plus a millimetre of leather. */
     const grip = HANDGUARD_RADIUS + 0.002;
 
@@ -986,34 +1167,67 @@ export function buildAssaultRifle(): RifleParts {
     around(118 * D, 0.003, gripZ - 0.028, [0.026, 0.021, 0.036], 0.009);
     around(104 * D, 0.001, gripZ - 0.066, [0.022, 0.018, 0.042], 0.008);
 
-    // Wrist and forearm, aligned to a single axis running back, down and left
-    // toward the shooter's body so the arm leaves frame instead of floating.
-    hand.add('glove', roundedBox(0.03, 0.042, 0.05, 0.014, 3), [-0.043, BORE_Y - 0.025, gripZ + 0.03], [0.6, -0.24, 0.2]);
+    // Wrist and forearm, every part aligned to one axis running down, out to
+    // the shooter's left and slightly back, so the arm leaves the frame at the
+    // bottom-left corner instead of standing up through the middle of it.
+    //
+    // Oval in section and tapered wrist to elbow, with the seam running along
+    // it. The previous forearm was a constant-diameter cylinder banded by
+    // three rings, which is the silhouette of a suppressor: the art director
+    // read it as the muzzle end of the weapon and complained that the muzzle
+    // was a plain tan cylinder. Nothing here is allowed to encircle the arm.
+    /** Unit vector down the arm toward the shoulder, in weapon space. */
+    const down = normalise(ARM_DIRECTION);
+    // Euler that aims a Z-axis primitive down `down`, solved rather than
+    // typed: the axis and the Euler were independent numbers before and drifted
+    // apart every time the arm was re-aimed, which sheared the cuff off the
+    // sleeve at an angle nobody noticed until the arm swung into open frame.
+    const armRot: [number, number, number] = [
+      Math.atan2(-down[1], down[2]),
+      Math.asin(down[0]),
+      0,
+    ];
+    const alongArm = (t: number, out: [number, number, number]): [number, number, number] => [
+      -0.0495 + down[0] * t + out[0],
+      BORE_Y - 0.056 + down[1] * t + out[1],
+      gripZ + 0.0525 + down[2] * t + out[2],
+    ];
+    /** Half-length of the sleeve, after the 0.85 foreshortening scale. */
+    const armEnd = 0.21 + (0.44 * 0.85) / 2;
+    // Back of the hand carried through to the wrist.
+    hand.add('glove', roundedBox(0.03, 0.042, 0.05, 0.014, 3), alongArm(-0.036, [0.006, 0.004, 0]), armRot);
     // Cuff: the seam between glove and sleeve, which stops the forearm
     // reading as one continuous tan pipe running out of the frame.
-    hand.add('glove', tube(0.028, 0.03, 0.016, 20), [-0.0475, BORE_Y - 0.049, gripZ + 0.049], [1.12, -0.1415, 0]);
-    // Steeply raked so the arm clears the bottom of the frame quickly: a
-    // shallower angle drags a long beige diagonal across the whole viewport.
-    hand.add('sleeve', tube(0.026, 0.029, 0.1, 20), [-0.053, BORE_Y - 0.092, gripZ + 0.072], [1.12, -0.1415, 0]);
-    hand.add('sleeve', tube(0.029, 0.033, 0.11, 20), [-0.068, BORE_Y - 0.185, gripZ + 0.117], [1.12, -0.1415, 0]);
-    // Rolled cuff, two fabric folds and a wrist strap. The forearm is the
-    // largest single silhouette the support arm puts on screen and it was a
-    // smooth beige pipe: at hip the eye reads it as a length of dowel before
-    // it reads it as an arm. These cost four parts and give the light
-    // somewhere to break, which is all the read needs.
-    hand.add('sleeve', tube(0.032, 0.031, 0.013, 20), [-0.0495, BORE_Y - 0.056, gripZ + 0.0525], [1.12, -0.1415, 0]);
-    for (const [t, r] of [
-      [0.055, 0.0305],
-      [0.105, 0.0325],
-    ]) {
-      hand.add(
-        'sleeve',
-        tube(r, r, 0.009, 20),
-        [-0.0495 - t * 0.145, BORE_Y - 0.056 - t * 0.9, gripZ + 0.0525 + t * 0.44],
-        [1.12, -0.1415, 0]
-      );
-    }
-    hand.add('rubber', tube(0.0315, 0.0315, 0.007, 20), [-0.0555, BORE_Y - 0.1, gripZ + 0.0765], [1.12, -0.1415, 0]);
+    hand.add('glove', tube(0.028, 0.03, 0.016, 20), alongArm(-0.008, [0, 0, 0]), armRot, [1.12, 1, 1]);
+    // One tube for the whole forearm rather than two butted together: at hip
+    // the join between them fell in open frame and read as a break in the arm.
+    hand.add('sleeve', tube(0.027, 0.047, 0.44, 22), alongArm(0.21, [0, 0, 0]), armRot, [1.14, 1, 0.85]);
+    // Rolled cuff at the wrist, where a cuff belongs and where the glove ends.
+    hand.add('sleeve', tube(0.032, 0.031, 0.013, 20), alongArm(0, [0, 0, 0]), armRot, [1.1, 1, 0.88]);
+    // Sleeve seam, running the length of the arm.
+    hand.add('sleeve', tube(0.0045, 0.005, 0.26, 12), alongArm(0.13, [-0.032, 0.005, -0.007]), armRot);
+    // Dome over the elbow end. At hip this is well outside the frame, but the
+    // reload swings the whole arm across open shot, and a cylinder cut off
+    // square there reads as an amputation rather than a limb continuing past
+    // the edge of the picture. Its base is the sleeve's own 27mm far radius
+    // and it carries the same 1.14 oval; anything wider stands out as a skirt.
+    hand.add(
+      'sleeve',
+      lathe(
+        [
+          [0, 0.03],
+          [0.0092, 0.0282],
+          [0.0174, 0.023],
+          [0.0221, 0.0172],
+          [0.0254, 0.0103],
+          [0.027, 0],
+        ],
+        22
+      ),
+      alongArm(armEnd, [0, 0, 0]),
+      armRot,
+      [1.14, 1, 1]
+    );
     hand.build(supportHand, materials, 'hand_', 26);
   }
   root.add(supportHand);
@@ -1074,7 +1288,7 @@ export function buildAssaultRifle(): RifleParts {
 
   const ejectionPort = new THREE.Object3D();
   ejectionPort.name = 'ejection_port';
-  ejectionPort.position.set(0.028, 0.055, -0.02);
+  ejectionPort.position.set(0.022, BORE_Y + 0.004, -0.012);
   root.add(ejectionPort);
 
   const aimPoint = new THREE.Object3D();

@@ -425,13 +425,27 @@ export function tube(
   return geometry;
 }
 
-/** A closed profile revolved about the Z axis. Points are (radius, z). */
+/**
+ * A closed profile revolved about the Z axis. Points are (radius, z).
+ *
+ * `LatheGeometry` only winds outward for a profile ordered along +Y, and
+ * every profile here is written nose-first, which is rear-to-front and so
+ * runs the other way. Left alone that turns each part inside out: front faces
+ * are culled and you see the far interior wall instead, which on a thin ring
+ * is only slightly wrong but on a domed cap reads as a hollow shell. Ordering
+ * is a notation detail rather than a modelling one, so it is normalised here
+ * instead of being every caller's problem.
+ */
 export function lathe(
   points: readonly (readonly [number, number])[],
   segments = 20
 ): THREE.BufferGeometry {
+  const ordered =
+    points.length > 1 && points[points.length - 1][1] < points[0][1]
+      ? [...points].reverse()
+      : points;
   const geometry = new THREE.LatheGeometry(
-    points.map(([r, z]) => new THREE.Vector2(r, z)),
+    ordered.map(([r, z]) => new THREE.Vector2(r, z)),
     segments
   );
   geometry.rotateX(Math.PI / 2);

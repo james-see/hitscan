@@ -43,13 +43,22 @@ export interface RigInput {
  * into the right margin they become two dark lumps against the weapon no
  * matter how well they are modelled.
  *
- * The yaw is the delicate number. It has to be large enough to swing the
- * buttstock past the right edge, since the stock sits 330mm behind the grip
- * and at any closer hold its magnified silhouette covers the firing hand
- * completely, but small enough that the receiver does not rotate out of frame
- * with it. This sits just past the crossover.
+ * The yaw is the delicate number, and it is set by occlusion rather than by
+ * taste. A carbine held at 17 degrees off the view axis hides its own front
+ * end: the barrel and flash hider stand 80mm forward of a handguard 25mm in
+ * radius, so they only clear its silhouette once the bore is about 25 degrees
+ * off the line of sight. Below that the muzzle is geometrically inside the
+ * tube in front of it, whatever the pose looks like otherwise, which is why
+ * the previous hold showed no muzzle at all. 0.5rad clears it with margin and
+ * still frames the whole weapon, butt pad included, inside the right edge.
+ *
+ * The roll is positive — the top cants inboard, toward the player's
+ * centreline, the way a right-handed shooter carries one. It used to lean the
+ * other way, which swung the magazine out to the left and turned the frame
+ * into a view of the weapon's underside, as though it were being carried
+ * muzzle-down rather than held ready.
  */
-const HIP_POSE = new Pose(0.125, -0.082, -0.6, 0.07, 0.19, -0.17);
+const HIP_POSE = new Pose(0.175, -0.115, -0.765, 0.02, 0.5, 0.05);
 /**
  * Low ready. The weapon drops out of the line of sight and cants across the
  * body, which is both the real technique and the clearest possible signal

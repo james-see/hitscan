@@ -27,6 +27,19 @@ const FRAMES = process.argv.includes('--frames')
   : 120;
 
 /**
+ * Frames run after the camera cut before sampling starts.
+ *
+ * `setShot` teleports the camera and converges 72 frames, but convergence
+ * steps at zero simulation delta while eye adaptation has a time constant
+ * near 0.9s, so a large part of the post-teleport ramp is still running when
+ * sampling would otherwise begin. Measuring through it reports a monotonic
+ * climb as though it were wander: the same build measured 1.9, 3.2 and 6.3 on
+ * three runs purely by catching different parts of the ramp. 300 frames is
+ * five time constants, which puts the residual under 1%.
+ */
+const SETTLE_FRAMES = 300;
+
+/**
  * Conditions to compare. Each disables one suspect, so a condition whose
  * pulse disappears identifies the term responsible.
  */
@@ -35,7 +48,11 @@ const CONDITIONS = [
   { id: 'frozen-scene', settings: {}, freeze: true },
   { id: 'no-ssao', settings: { ssaoEnabled: false } },
   { id: 'no-taa', settings: { antialias: 'none' } },
-  { id: 'no-autoexposure', settings: { autoExposureEnabled: false } },
+  // Matched to the exposure the loop settles on. Without this the pass is
+  // compared against an operating point 2.5 stops darker, where the AgX toe
+  // compresses every kind of noise -- so the pass reads as the noise source
+  // when the difference is really the brightness the comparison was made at.
+  { id: 'no-autoexposure', settings: { autoExposureEnabled: false }, matchExposure: true },
   { id: 'no-motionblur', settings: { motionBlurEnabled: false } },
   { id: 'no-bloom', settings: { bloomEnabled: false } },
 ];
@@ -44,7 +61,7 @@ const CONDITIONS = [
  * Runs the engine for n frames and returns per-frame mean luminance of the
  * darkest pixels, measured in-page.
  */
-function collectInPage({ frames, freeze }) {
+function collectInPage({ frames, freeze, settleFrames }) {
   return new Promise((resolve) => {
     const engine = window.engine;
     const gl = engine.renderer.getContext();
@@ -69,7 +86,18 @@ function collectInPage({ frames, freeze }) {
     // correctly following it" from "the adaptation loop cannot settle".
     engine.time.scale = freeze ? 0 : 1;
 
+    let settled = 0;
+
     const sample = () => {
+      // Burn off the post-teleport adaptation ramp before the first sample,
+      // otherwise the series is dominated by a transient climbing toward the
+      // new exposure and every statistic below describes that instead.
+      if (settled < settleFrames) {
+        settled++;
+        requestAnimationFrame(sample);
+        return;
+      }
+
       gl.readPixels(x, y, w, h, gl.RGBA, gl.UNSIGNED_BYTE, buf);
 
       if (mask === null) {
@@ -194,14 +222,34 @@ async function main() {
 
     const rows = [];
     for (const condition of CONDITIONS) {
+      await page.evaluate((id) => window.__hitscan.setShot(id), shot);
+
+      if (condition.matchExposure) {
+        // Read the exposure the loop settles on with the pass still enabled,
+        // then pin the fallback to it before switching the pass off.
+        const settled = await page.evaluate(async (settleFrames) => {
+          await new Promise((resolve) => {
+            let n = 0;
+            const tick = () => (++n < settleFrames ? requestAnimationFrame(tick) : resolve());
+            requestAnimationFrame(tick);
+          });
+          return window.__hitscanPost?.exposure()?.exposure ?? null;
+        }, SETTLE_FRAMES);
+
+        if (settled === null) throw new Error('cannot read exposure; matched comparison impossible');
+        await page.evaluate((v) => window.__hitscanPost.setManualExposure(v), settled);
+        process.stdout.write(`  (matching fixed exposure to ${settled.toFixed(4)})\n`);
+      }
+
       await page.evaluate((settings) => {
         for (const [k, v] of Object.entries(settings)) window.__hitscan.setSetting(k, v);
       }, condition.settings);
-      await page.evaluate((id) => window.__hitscan.setShot(id), shot);
 
       const { series, maskPixels } = await page.evaluate(collectInPage, {
         frames: FRAMES,
         freeze: condition.freeze === true,
+        // Already burnt off while reading the exposure to match against.
+        settleFrames: condition.matchExposure ? 0 : SETTLE_FRAMES,
       });
       const row = summarise(condition.id, series, maskPixels);
       rows.push(row);
