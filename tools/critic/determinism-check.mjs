@@ -19,7 +19,10 @@ import sharp from 'sharp';
 import { capture, startServer, launchBrowser } from './capture.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const OUT = path.join(ROOT, 'captures', '_determinism');
+// Suffixed per invocation. Two agents running this concurrently against a
+// fixed path deleted each other's captures mid-run, which surfaces as a
+// spurious failure of the one tool whose whole job is to be believed.
+const OUT = path.join(ROOT, 'captures', `_determinism-${process.pid}`);
 
 /** Per-pixel statistics between two images of identical dimensions. */
 async function compare(a, b) {
@@ -118,6 +121,9 @@ async function main() {
       process.exitCode = 1;
     } else {
       process.stdout.write('PASS: captures are byte-identical across runs.\n');
+      // Kept on failure: the differing images are the evidence, and the whole
+      // point of the tool is that its verdict can be checked by eye.
+      await rm(OUT, { recursive: true, force: true });
     }
   } finally {
     await browser.close();
