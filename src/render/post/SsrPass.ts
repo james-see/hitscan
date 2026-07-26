@@ -27,6 +27,20 @@ import {
  * would double the specular. Expressing it as a difference means a ray that
  * misses contributes exactly zero and the probe simply remains, which is the
  * graceful fallback rather than a special case.
+ *
+ * That difference used to round to nothing. Toggling the pass changed zero
+ * pixels on all six review framings while the trace was demonstrably returning
+ * reflections over a fifth of the frame, because two terms multiplied it away:
+ * a dielectric-only Fresnel of 0.04, for want of a metalness channel, and a
+ * roughness-to-mip curve that sent every surface in the scene to a 32-pixel
+ * average of the reflection pyramid -- which is the environment probe, near
+ * enough, so the difference really was zero.
+ *
+ * Both are fixed here, and the ordering between them is worth keeping: with the
+ * mip curve left alone, adding metalness on its own still changed zero pixels.
+ * Fresnel scales a difference, so no F0 can rescue a difference that is already
+ * zero. The curve is the term that gates the pass; metalness is what decides
+ * how much of what it recovers is worth showing.
  */
 export class SsrPass implements RenderPass {
   readonly name = 'ssr';
@@ -35,7 +49,21 @@ export class SsrPass implements RenderPass {
 
   /** Maximum ray length in metres. */
   maxDistance = 40;
-  /** Depth tolerance when accepting a hit, in metres. */
+  /**
+   * How far behind a surface a ray may pass and still count as landing on it,
+   * in metres.
+   *
+   * A screen-space march only knows the front face of what it marches over, so
+   * it has to assume a thickness. Too generous and a ray travelling nearly
+   * parallel to a surface stays inside the tolerance for a long stretch and
+   * registers a false hit on the surface it started from, drawing it back onto
+   * itself as a streak.
+   *
+   * Tightening this was the obvious suspect for the ink-black streaks the
+   * sharpened composite exposed on concrete, and it is not the cause: taking it
+   * from 0.4 down to 0.05 left them intact and cost 7% of the pass's coverage.
+   * `mipGraze` is what clears them. Left alone on that evidence.
+   */
   thickness = 0.4;
   intensity = 1.0;
   /**
@@ -43,6 +71,17 @@ export class SsrPass implements RenderPass {
    *
    * Beyond this the lobe is so wide that a single mirror ray carries no
    * information the environment probe does not already have.
+   *
+   * Left where it was after measuring, not for want of trying to tighten it.
+   * Dropping it from 1.0 to 0.75 changed no pixels at all, and below 0.65 it
+   * started removing contribution that is visible. It cannot separate the
+   * surfaces worth tracing from the ones that are not, either, because the
+   * concrete and the metal both sit at 0.5 to 0.7: in this scene roughness is a
+   * statement about weathering, not about whether a surface reflects.
+   *
+   * So this gate is close to inert, and that is the honest reading rather than a
+   * missed saving. It earns its place as a guard against content that does not
+   * exist yet, not as a filter on content that does.
    */
   maxRoughness = 0.85;
 
@@ -55,25 +94,63 @@ export class SsrPass implements RenderPass {
    * composite had nothing to contribute even before Fresnel scaled it down.
    * Raising the exponent above 1 pushes the blur towards the genuinely rough
    * end and leaves glossy surfaces some structure.
+   *
+   * Fitted against the measured distribution, which spans 0.42 to 0.87 with 89%
+   * of the frame between 0.5 and 0.7. The scene has no mirrors and nothing truly
+   * matte, so the whole of it sat inside the band the square root sent to levels
+   * 3.5 through 4.2 -- a 12 to 18 pixel average, indistinguishable from the probe
+   * by construction. At 2.0 that band maps to 1.7 through 2.8 instead.
+   *
+   * Confirmed after the depth prepass was fixed to compose each material's
+   * `onBeforeCompile` rather than replace it, which is what had been dropping
+   * the world's roughness modulation. The correction moved roughness on most of
+   * each frame but only by a mean of 0.012 to 0.019, always toward rougher, worth
+   * about a twentieth of a mip level here and no gate flips. Small enough that
+   * the constants fitted before it survived unchanged.
    */
-  mipExponent = 1.6;
+  mipExponent = 2.0;
   /**
    * Blur applied even to a mirror.
    *
-   * Not zero, because only a fraction of pixels return a hit: below about half
-   * a level the reflection stops being resolved from neighbouring hits and
-   * starts being resolved from the misses between them, which reads as speckle.
+   * Not zero, because only a fifth of pixels return a hit, so at level zero the
+   * reflection is resolved from a buffer that is mostly holes. Setting it to
+   * zero pushed the frame's changed-pixel count from 28% to 88% and the change
+   * was hard-edged blotching on the ground, not detail.
    */
   mipFloor = 0.6;
+  /**
+   * Extra blur at grazing incidence, in pyramid levels at the limit.
+   *
+   * Two reasons, pointing the same way. The reflected lobe is stretched along
+   * the surface as the view flattens, so its screen footprint is wider than
+   * roughness alone implies. And a ray leaving almost parallel to the surface
+   * covers a lot of world space per pixel it advances, so one bad hit smears a
+   * long way -- which is what appears as ink-black streaks trailing across
+   * concrete once the curve is sharp enough to stop hiding them.
+   *
+   * Chosen as the smallest value that cleared those streaks, so it moves with
+   * `mipExponent`. The reason for the term is geometric rather than empirical,
+   * so it does not go away if the material set changes.
+   */
+  mipGraze = 2.2;
 
   /**
    * Reflectance of metal at normal incidence.
    *
-   * Real metals sit around 0.9 to 0.95. The point of the number is that it is
-   * an order of magnitude above the dielectric 0.04, which is what made every
+   * Iron and steel sit near 0.56, chrome near 0.55; 0.9 is aluminium or silver,
+   * which is not what a shipyard is built from. What matters is that it is an
+   * order of magnitude above the dielectric 0.04, which is what made every
    * reflection in the frame invisible.
+   *
+   * Nothing in the arena is authored above metalness 0.26 -- `rusted_metal` sits
+   * at 0.25, correctly, because rust is a dielectric -- so metal arrives here at
+   * an effective F0 near 0.19 and reflections read restrained. That is the scene
+   * rather than the constant: this is the reflectance of steel, so bare steel and
+   * container walls will reflect properly as soon as any are authored, with
+   * nothing here to change. Raising it to make the current rust look shinier
+   * would be paying for an art gap with a physical error.
    */
-  metalReflectance = 0.9;
+  metalReflectance = 0.6;
   /**
    * How much of the surface's hue is carried into its metallic F0, 0 to 1.
    *
@@ -396,9 +473,10 @@ export class SsrPass implements RenderPass {
         uIntensity: { value: 1 },
         uMaxLevel: { value: 5 },
         uEnvironmentIntensity: { value: 1 },
-        uMipExponent: { value: 1.6 },
+        uMipExponent: { value: 2.0 },
         uMipFloor: { value: 0.6 },
-        uMetalReflectance: { value: 0.9 },
+        uMipGraze: { value: 2.2 },
+        uMetalReflectance: { value: 0.6 },
         uMetalTint: { value: 0.5 },
         uMetalness: { value: -1 },
         uHasMetalness: { value: 0 },
@@ -419,6 +497,7 @@ export class SsrPass implements RenderPass {
         uniform float uEnvironmentIntensity;
         uniform float uMipExponent;
         uniform float uMipFloor;
+        uniform float uMipGraze;
         uniform float uMetalReflectance;
         uniform float uMetalTint;
         uniform float uMetalness;
@@ -428,6 +507,26 @@ export class SsrPass implements RenderPass {
         ${GLSL_DEPTH}
         ${GLSL_MIP_CHAIN}
         #include <cube_uv_reflection_fragment>
+
+        /**
+         * Karis' analytic fit to the split-sum environment BRDF, returning the
+         * pair that scales F0 and F90.
+         *
+         * The forward pass weights its probe lookup by the same pair, read from
+         * three's dfgLUT texture. Matching it matters more than the two percent
+         * the fit costs in accuracy: this pass composites the *difference*
+         * between the trace and the probe, so any weight larger than the one
+         * the probe was applied with subtracts light that was never added, and
+         * the error shows up as ground that goes black under an object rather
+         * than as a reflection that is slightly the wrong strength.
+         */
+        vec2 dfgApprox(float roughness, float NdotV) {
+          const vec4 c0 = vec4(-1.0, -0.0275, -0.572, 0.022);
+          const vec4 c1 = vec4(1.0, 0.0425, 1.04, -0.04);
+          vec4 r = roughness * c0 + c1;
+          float a004 = min(r.x * r.x, exp2(-9.28 * NdotV)) * r.x + r.y;
+          return vec2(-1.04, 1.04) * a004 + r.zw;
+        }
 
         /** Trilinear across a pyramid whose levels alternate between textures. */
         vec4 sampleReflection(vec2 uv, float mip) {
@@ -455,8 +554,10 @@ export class SsrPass implements RenderPass {
           // Wider lobes read from blurrier levels of the reflection pyramid.
           // Anchoring the mapping to the pyramid depth keeps the perceived
           // blur resolution-independent.
+          float graze = 1.0 - NdotV;
           float mip = clamp(
-            uMipFloor + (uMaxLevel - uMipFloor) * pow(roughness, uMipExponent),
+            uMipFloor + uMipGraze * graze * graze +
+              (uMaxLevel - uMipFloor) * pow(roughness, uMipExponent),
             0.0,
             uMaxLevel
           );
@@ -496,17 +597,15 @@ export class SsrPass implements RenderPass {
             metalness
           );
 
-          // Schlick with a roughness-aware horizon term, so a rough surface
-          // does not develop a hard bright rim at the silhouette.
-          float f = pow(1.0 - NdotV, 5.0);
-          vec3 fresnel = f0 + (max(vec3(1.0 - roughness), f0) - f0) * f;
+          // F90 is 1, matching three's default specularF90.
+          vec2 fab = dfgApprox(roughness, NdotV);
+          vec3 weight = f0 * fab.x + fab.y;
 
           // A difference rather than an addition: the forward pass has already
-          // lit this pixel from the environment probe, so what the trace adds
-          // is the correction from probe to what is actually on screen. Getting
-          // that wrong shows up as reflections that glow rather than as missing
-          // ones, which is why the tint is held back rather than taken whole.
-          vec3 delta = (traced - probe) * confidence * fresnel * uIntensity;
+          // lit this pixel from the environment probe, so what the trace
+          // contributes is the correction from that probe to what is actually
+          // on screen, at the weight the probe was applied with.
+          vec3 delta = (traced - probe) * confidence * weight * uIntensity;
           gl_FragColor = vec4(max(color + delta, 0.0), 1.0);
         }
       `,
@@ -681,6 +780,7 @@ export class SsrPass implements RenderPass {
     composite.set('uHasMetalness', post.velocity === null ? 0 : 1);
     composite.set('uMipExponent', this.mipExponent);
     composite.set('uMipFloor', this.mipFloor);
+    composite.set('uMipGraze', this.mipGraze);
     composite.set('uMetalReflectance', this.metalReflectance);
     composite.set('uMetalTint', this.metalTint);
     composite.set('uMetalness', this.metalnessOverride);
