@@ -15,7 +15,13 @@ export const MK4_CARBINE: WeaponDefinition = {
   fireRate: 700,
   fireMode: 'auto',
   magazineSize: 30,
-  reserveAmmo: 210,
+  // Deliberately generous, and a stopgap: nothing in the game resupplies, so
+  // the reserve is the entire round's ammunition. At 210 it ran out around the
+  // half-way mark of a ten-minute round and left the score limit unreachable.
+  // 500 buys roughly 17 rounds per kill against the 30-kill limit, which a
+  // real accuracy can meet. Cut this back to a realistic loadout once pickups
+  // land -- see the ammunition economy entry in docs/ROADMAP.md.
+  reserveAmmo: 500,
   damage: 26,
   headshotMultiplier: 1.6,
   falloffStart: 28,

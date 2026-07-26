@@ -94,12 +94,18 @@ Found by playing: the player runs dry around the five-minute mark of a
 ten-minute round and stays dry, because nothing in the game restores ammunition.
 `#reserve` is set once at equip and refilled only on `game:restart`.
 
-The economy cannot support the win condition. The carbine carries 30 + 210 = 240
-rounds. At 26 damage it needs four hits inside 28m and five past 55m, so the
-score limit of 30 kills allows an eight-round budget per kill — roughly 50–60%
+The economy could not support the win condition. The carbine carried 30 + 210 =
+240 rounds. At 26 damage it needs four hits inside 28m and five past 55m, so the
+score limit of 30 kills allowed an eight-round budget per kill — roughly 50–60%
 accuracy sustained on a 700rpm automatic, with nothing left over for suppression
 or missed engagements. A player who empties the reserve has no melee and no
 sidearm, so the remainder of the round is unplayable.
+
+The reserve has been raised to 500 as a stopgap, which is about 17 rounds per
+kill. That makes the round winnable but is not a design: it is one number
+standing in for a mechanic, and it means the player starts every round carrying
+an implausible 530 rounds. Cut it back to a realistic loadout once resupply
+exists.
 
 Three options, not exclusive:
 
