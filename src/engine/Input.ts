@@ -23,6 +23,12 @@ const DEFAULT_BINDINGS: Record<InputAction, string> = {
 };
 
 /**
+ * Actions that survive a lockout. Escape has to work or the player is stuck,
+ * and the scoreboard is the one thing worth reading while dead.
+ */
+const LOCKOUT_EXEMPT: readonly InputAction[] = ['pause', 'scoreboard'];
+
+/**
  * Pointer-lock mouse-and-keyboard input, abstracted into named actions.
  *
  * Look deltas accumulate across the frame rather than being sampled, so input
@@ -39,6 +45,8 @@ export class Input implements InputState {
   #lookX = 0;
   #lookY = 0;
   #locked = false;
+  #lockedOut = false;
+  #exempt: Set<InputAction> = new Set(LOCKOUT_EXEMPT);
 
   readonly look = { x: 0, y: 0 };
   readonly move = { x: 0, y: 0 };
@@ -128,8 +136,11 @@ export class Input implements InputState {
 
   /** Called once per frame by the engine, before any module updates. */
   beginFrame(): void {
-    this.look.x = this.#lookX * this.sensitivity * this.sensitivityMultiplier;
-    this.look.y = this.#lookY * this.sensitivity * this.sensitivityMultiplier;
+    const scale = this.#lockedOut ? 0 : this.sensitivity * this.sensitivityMultiplier;
+    this.look.x = this.#lookX * scale;
+    this.look.y = this.#lookY * scale;
+    // Cleared either way, so a lockout does not bank mouse movement and fling
+    // the camera when it lifts.
     this.#lookX = 0;
     this.#lookY = 0;
 
@@ -155,17 +166,49 @@ export class Input implements InputState {
     this.#released.clear();
   }
 
+  /**
+   * Suppresses actions at the source, for states where the player is present
+   * but should not be acting — dead, in the lobby, watching the results.
+   *
+   * It has to live here rather than in the module that wants it, because
+   * consumers read this object directly: gating the player module still
+   * leaves the weapon reading the trigger, the reload and the sights, so a
+   * dead player empties a magazine into the floor. Suppressing at the reader
+   * covers everything, including anything added later.
+   *
+   * Look deltas and `move` are suppressed with the rest. `pause` and
+   * `scoreboard` are always exempt, since a lockout the player cannot escape
+   * is a hang.
+   */
+  setLockout(locked: boolean, exempt: readonly InputAction[] = LOCKOUT_EXEMPT): void {
+    this.#lockedOut = locked;
+    this.#exempt = new Set(exempt);
+  }
+
+  get lockedOut(): boolean {
+    return this.#lockedOut;
+  }
+
+  #suppressed(action: InputAction): boolean {
+    return this.#lockedOut && !this.#exempt.has(action);
+  }
+
   isDown(action: InputAction): boolean {
+    if (this.#suppressed(action)) return false;
     const code = this.#bindings.get(action);
     return code !== undefined && this.#down.has(code);
   }
 
   wasPressed(action: InputAction): boolean {
+    if (this.#suppressed(action)) return false;
     const code = this.#bindings.get(action);
     return code !== undefined && this.#pressed.has(code);
   }
 
   wasReleased(action: InputAction): boolean {
+    // Not suppressed. A release that happened while locked out still has to
+    // reach whoever is holding the corresponding press, or a trigger held
+    // through the moment of death stays latched down after the respawn.
     const code = this.#bindings.get(action);
     return code !== undefined && this.#released.has(code);
   }

@@ -54,4 +54,20 @@ export interface InputState {
 
   rebind(action: InputAction, code: string): void;
   getBinding(action: InputAction): string | undefined;
+
+  /**
+   * Suppresses actions at the source, for states where the player is present
+   * but must not act — dead, in the lobby, reading the results.
+   *
+   * Belongs to input rather than to the state that wants it, because
+   * consumers hold this object directly. Gating a single module leaves the
+   * weapon still reading the trigger and the sights, so a dead player empties
+   * a magazine into the floor; suppressing at the reader covers every
+   * consumer, including ones added later.
+   *
+   * `move` and look are suppressed too. Releases are not, so a trigger held
+   * through the moment of death does not stay latched after the respawn.
+   */
+  setLockout(locked: boolean, exempt?: readonly InputAction[]): void;
+  readonly lockedOut: boolean;
 }
