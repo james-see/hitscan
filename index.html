@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <title>HITSCAN</title>
+    <!-- Inline so the browser's automatic /favicon.ico probe cannot 404 into
+         the console and bury real errors during capture runs. -->
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230d0f12'/%3E%3Ccircle cx='16' cy='16' r='9' fill='none' stroke='%23e8c15a' stroke-width='2'/%3E%3Cpath d='M16 3v7M16 22v7M3 16h7M22 16h7' stroke='%23e8c15a' stroke-width='2'/%3E%3C/svg%3E"
+    />
+    <style>
+      :root {
+        color-scheme: dark;
+        --accent: #ff9d2e;
+      }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #05070a;
+        font-family: 'Rajdhani', 'Barlow Condensed', system-ui, -apple-system, sans-serif;
+        color: #e8eef5;
+      }
+      #app { position: relative; width: 100%; height: 100%; }
+      canvas#viewport {
+        display: block;
+        width: 100%;
+        height: 100%;
+        cursor: none;
+        touch-action: none;
+      }
+      #hud {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        user-select: none;
+      }
+
+      /* -- loading ------------------------------------------------------- */
+      #loader {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 22px;
+        background: radial-gradient(ellipse at 50% 45%, #10161f 0%, #05070a 70%);
+        z-index: 100;
+        transition: opacity 0.6s ease;
+      }
+      #loader.hidden { opacity: 0; pointer-events: none; }
+      #loader h1 {
+        font-size: 64px;
+        font-weight: 700;
+        letter-spacing: 0.42em;
+        text-indent: 0.42em;
+        color: #f2f6fa;
+        text-shadow: 0 0 40px rgba(255, 157, 46, 0.35);
+      }
+      #loader .sub {
+        font-size: 12px;
+        letter-spacing: 0.34em;
+        text-indent: 0.34em;
+        text-transform: uppercase;
+        color: #6b7c8f;
+      }
+      #bar-track {
+        width: 340px;
+        height: 2px;
+        background: rgba(255, 255, 255, 0.09);
+        overflow: hidden;
+      }
+      #bar-fill {
+        height: 100%;
+        width: 0%;
+        background: linear-gradient(90deg, var(--accent), #ffd08a);
+        box-shadow: 0 0 12px rgba(255, 157, 46, 0.8);
+        transition: width 0.18s ease-out;
+      }
+      #loader .status {
+        font-size: 11px;
+        letter-spacing: 0.2em;
+        color: #4d5b6b;
+        height: 14px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* -- click to play ------------------------------------------------- */
+      #start-prompt {
+        position: absolute;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        gap: 14px;
+        background: rgba(5, 7, 10, 0.55);
+        backdrop-filter: blur(4px);
+        z-index: 90;
+        cursor: pointer;
+      }
+      #start-prompt.visible { display: flex; }
+      #start-prompt .cta {
+        font-size: 15px;
+        letter-spacing: 0.32em;
+        text-indent: 0.32em;
+        text-transform: uppercase;
+        padding: 14px 30px;
+        border: 1px solid rgba(255, 157, 46, 0.5);
+        color: var(--accent);
+        background: rgba(255, 157, 46, 0.06);
+      }
+      #start-prompt .hint {
+        font-size: 11px;
+        letter-spacing: 0.18em;
+        color: #64748b;
+        text-transform: uppercase;
+      }
+      #error {
+        position: absolute;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 40px;
+        z-index: 200;
+        background: #05070a;
+      }
+      #error.visible { display: flex; }
+      #error pre {
+        font: 12px/1.6 ui-monospace, Menlo, monospace;
+        color: #ff6b6b;
+        white-space: pre-wrap;
+        max-width: 800px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="viewport"></canvas>
+      <div id="hud"></div>
+
+      <div id="start-prompt">
+        <div class="cta">Click to deploy</div>
+        <div class="hint">WASD move &middot; Shift sprint &middot; Ctrl crouch &middot; R reload &middot; Esc release cursor</div>
+      </div>
+
+      <div id="loader">
+        <h1>HITSCAN</h1>
+        <div class="sub">Tactical Engagement Simulator</div>
+        <div id="bar-track"><div id="bar-fill"></div></div>
+        <div class="status" id="loader-status">Initialising renderer</div>
+      </div>
+
+      <div id="error"><pre id="error-text"></pre></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

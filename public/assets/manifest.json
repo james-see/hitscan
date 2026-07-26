@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "generatedAt": "2026-07-26T03:54:01.201Z",
+  "materials": [
+    {
+      "id": "concrete_ground",
+      "albedo": "/assets/textures/concrete_ground_albedo.webp",
+      "normal": "/assets/textures/concrete_ground_normal.jpg",
+      "orm": "/assets/textures/concrete_ground_orm.jpg",
+      "tileScale": 4,
+      "source": {
+        "name": "Concrete Floor 02",
+        "author": "Rob Tuytel",
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/concrete_floor_02"
+      }
+    },
+    {
+      "id": "plaster_wall",
+      "albedo": "/assets/textures/plaster_wall_albedo.webp",
+      "normal": "/assets/textures/plaster_wall_normal.jpg",
+      "orm": "/assets/textures/plaster_wall_orm.jpg",
+      "tileScale": 3,
+      "source": {
+        "name": "Beige Wall 001",
+        "author": "Dimitrios Savva, Rico Cilliers",
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/beige_wall_001"
+      }
+    },
+    {
+      "id": "rusted_metal",
+      "albedo": "/assets/textures/rusted_metal_albedo.webp",
+      "normal": "/assets/textures/rusted_metal_normal.jpg",
+      "orm": "/assets/textures/rusted_metal_orm.jpg",
+      "tileScale": 2.5,
+      "source": {
+        "name": "Worn Corrugated Iron",
+        "author": "Jenelle van Heerden, Dimitrios Savva",
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/worn_corrugated_iron"
+      }
+    },
+    {
+      "id": "wood_planks",
+      "albedo": "/assets/textures/wood_planks_albedo.webp",
+      "normal": "/assets/textures/wood_planks_normal.jpg",
+      "orm": "/assets/textures/wood_planks_orm.jpg",
+      "tileScale": 2,
+      "source": {
+        "name": "Old Planks 02",
+        "author": "Rob Tuytel",
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/old_planks_02"
+      }
+    },
+    {
+      "id": "concrete_trim",
+      "albedo": "/assets/textures/concrete_trim_albedo.webp",
+      "normal": "/assets/textures/concrete_trim_normal.jpg",
+      "orm": "/assets/textures/concrete_trim_orm.jpg",
+      "tileScale": 3.5,
+      "source": {
+        "name": "Concrete Wall 008",
+        "author": "Dario Barresi, Charlotte Baglioni",
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/concrete_wall_008"
+      }
+    }
+  ],
+  "models": [],
+  "audio": [],
+  "environments": [
+    {
+      "id": "courtyard_noon",
+      "url": "/assets/env/courtyard_noon.hdr",
+      "intensity": 1,
+      "source": {
+        "name": "Spiaggia di Mondello",
+        "author": "Andreas Mischok",
+        "license": "CC0-1.0",
+        "url": "https://polyhaven.com/a/spiaggia_di_mondello"
+      }
+    }
+  ]
+}

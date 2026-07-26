@@ -1,0 +1,1367 @@
+/*
+ * HITSCAN heads-up display.
+ *
+ * Every selector is nested under #hud so nothing can reach the page shell.
+ *
+ * Geometry is expressed in multiples of --u (an 8px grid scaled by viewport
+ * height) and animation is restricted to transform/opacity so the HUD never
+ * forces layout while the game is running.
+ */
+
+#hud {
+  /* 1.0 at 1440p. Set from the resize handler; clamped so a small window
+     keeps readable type and a large one does not turn cartoonish. */
+  --ui-scale: 1;
+  --u: calc(8px * var(--ui-scale));
+  /* One safe-area inset for every screen-anchored widget, on every edge. */
+  --safe: calc(var(--u) * 5);
+
+  --fs-micro: calc(var(--u) * 1.25);
+  --fs-xs: calc(var(--u) * 1.5);
+  --fs-sm: calc(var(--u) * 1.75);
+  --fs-md: calc(var(--u) * 2.25);
+  --fs-lg: calc(var(--u) * 3.25);
+  --fs-xxl: calc(var(--u) * 7);
+
+  --font-display: 'DIN Condensed', 'Avenir Next Condensed', 'Roboto Condensed',
+    'Barlow Condensed', 'Arial Narrow', sans-serif;
+  --font-ui: 'Avenir Next Condensed', 'Roboto Condensed', 'Barlow Condensed',
+    system-ui, sans-serif;
+
+  --ink: #dee6ee;
+  --ink-2: rgba(222, 230, 238, 0.62);
+  --ink-3: rgba(222, 230, 238, 0.34);
+  --ink-4: rgba(222, 230, 238, 0.14);
+  --accent: #ff9d2e;
+  --danger: #ff4b3a;
+  --danger-soft: rgba(255, 75, 58, 0.55);
+  --revive: #6fe3a8;
+
+  /* Two-stage shadow: a tight dark edge for contrast against a blown-out sky,
+     plus a wide soft halo so the glyph never disappears into a bright wall. */
+  --shadow-text: 0 1px 1px rgba(0, 0, 0, 0.92), 0 0 calc(var(--u) * 1.5) rgba(0, 0, 0, 0.55);
+  --shadow-box: 0 1px 2px rgba(0, 0, 0, 0.55), 0 0 calc(var(--u) * 2) rgba(0, 0, 0, 0.35);
+  --stroke: 0 0 0 1px rgba(0, 0, 0, 0.55);
+  /* Peak opacity of a widget backing. See the shared scrim rule below. */
+  --scrim: rgba(4, 7, 11, 0.42);
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-punch: cubic-bezier(0.12, 0.9, 0.22, 1);
+  --ease-in: cubic-bezier(0.5, 0, 0.9, 0.4);
+
+  font-family: var(--font-display);
+  font-weight: 700;
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  /* Deliberately not `contain: layout`: that would make #hud a stacking
+     context and trap the pause menu behind the page shell's start prompt.
+     Containment is applied to the individual widgets instead. */
+}
+
+#hud * {
+  box-sizing: border-box;
+}
+
+/* Corner widgets can never influence anything outside themselves. */
+#hud .vitals,
+#hud .ammo,
+#hud .killfeed,
+#hud .compass,
+#hud .notices {
+  contain: layout style;
+}
+
+/*
+ * Capture harness: hold every animation at a chosen frame so a still can be
+ * judged with the transient elements at their peak rather than mid-fade.
+ */
+#hud.is-frozen *,
+#hud.is-frozen *::before,
+#hud.is-frozen *::after {
+  animation-play-state: paused !important;
+}
+
+/* ── crosshair ──────────────────────────────────────────────────────────── */
+
+#hud .ch {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  /* Driven per frame from the weapon's cone of fire, in CSS pixels. */
+  --gap: 10px;
+  --len: calc(var(--u) * 1.55);
+  --thick: max(2px, calc(var(--u) * 0.32));
+  --fade: 0.92;
+  --ads-fade: 1;
+  --sprint-fade: 1;
+  opacity: calc(var(--fade) * var(--ads-fade) * var(--sprint-fade));
+  transition: opacity 90ms linear;
+}
+
+#hud .ch-tick {
+  position: absolute;
+  left: 0;
+  top: 0;
+  background: #f2f6fa;
+  /* A hard dark edge plus a soft halo: the reticle has to survive both a
+     blown-out sky and a black doorway without changing colour. */
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.72),
+    0 0 4px rgba(0, 0, 0, 0.55);
+}
+
+#hud .ch-tick--v {
+  width: var(--thick);
+  height: var(--len);
+  margin-left: calc(var(--thick) / -2);
+}
+#hud .ch-tick--h {
+  width: var(--len);
+  height: var(--thick);
+  margin-top: calc(var(--thick) / -2);
+}
+#hud .ch-tick--u {
+  transform: translateY(calc(-1 * var(--gap) - var(--len)));
+}
+#hud .ch-tick--d {
+  transform: translateY(var(--gap));
+}
+#hud .ch-tick--l {
+  transform: translateX(calc(-1 * var(--gap) - var(--len)));
+}
+#hud .ch-tick--r {
+  transform: translateX(var(--gap));
+}
+
+#hud .ch-dot {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--thick);
+  height: var(--thick);
+  margin: calc(var(--thick) / -2);
+  border-radius: 50%;
+  background: #f2f6fa;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.72),
+    0 0 4px rgba(0, 0, 0, 0.55);
+}
+#hud .ch:not(.has-dot) .ch-dot {
+  display: none;
+}
+
+/* Sprinting cannot be aimed from, so the reticle recedes rather than lying. */
+#hud .ch.is-sprinting {
+  --sprint-fade: 0.32;
+}
+
+#hud .ch.is-firing .ch-tick {
+  animation: ch-kick 110ms var(--ease-out);
+}
+@keyframes ch-kick {
+  0% {
+    background: #fff6e8;
+  }
+  100% {
+    background: var(--ink);
+  }
+}
+
+/* ── hitmarker ──────────────────────────────────────────────────────────── */
+
+#hud .hm {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  --hm-len: calc(var(--u) * 1.4);
+  --hm-thick: max(2px, calc(var(--u) * 0.28));
+  --hm-r: calc(var(--u) * 1.5);
+  --hm-color: var(--ink);
+}
+
+#hud .hm-arm {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--hm-thick);
+  height: var(--hm-len);
+  margin-left: calc(var(--hm-thick) / -2);
+  margin-top: calc(var(--hm-len) / -2);
+  background: var(--hm-color);
+  box-shadow: var(--stroke);
+  transform: rotate(var(--rot)) translateY(calc(-1 * var(--hm-r)));
+}
+#hud .hm-arm:nth-child(1) {
+  --rot: 45deg;
+}
+#hud .hm-arm:nth-child(2) {
+  --rot: 135deg;
+}
+#hud .hm-arm:nth-child(3) {
+  --rot: 225deg;
+}
+#hud .hm-arm:nth-child(4) {
+  --rot: 315deg;
+}
+
+#hud .hm-ring {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: calc(var(--u) * 5);
+  height: calc(var(--u) * 5);
+  margin: calc(var(--u) * -2.5);
+  border: 1.5px solid var(--hm-color);
+  border-radius: 50%;
+  opacity: 0;
+}
+
+/* Normal hit: short, sharp, gone in under a sixth of a second. */
+#hud .hm.is-hit {
+  animation: hm-pop 150ms var(--ease-punch) forwards;
+}
+#hud .hm.is-head {
+  --hm-color: #fff1dc;
+  --hm-len: calc(var(--u) * 1.75);
+  --hm-thick: max(2px, calc(var(--u) * 0.34));
+  animation: hm-pop 210ms var(--ease-punch) forwards;
+}
+#hud .hm.is-head .hm-ring {
+  animation: hm-ring 260ms var(--ease-out) forwards;
+}
+#hud .hm.is-kill {
+  --hm-color: var(--danger);
+  --hm-len: calc(var(--u) * 2);
+  --hm-thick: max(2px, calc(var(--u) * 0.4));
+  --hm-r: calc(var(--u) * 1.7);
+  animation: hm-pop-kill 300ms var(--ease-punch) forwards;
+}
+#hud .hm.is-kill .hm-ring {
+  animation: hm-ring 340ms var(--ease-out) forwards;
+}
+
+@keyframes hm-pop {
+  0% {
+    opacity: 1;
+    transform: scale(1.5);
+  }
+  30% {
+    opacity: 1;
+    transform: scale(0.95);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.12);
+  }
+}
+@keyframes hm-pop-kill {
+  0% {
+    opacity: 1;
+    transform: scale(1.7) rotate(-6deg);
+  }
+  26% {
+    opacity: 1;
+    transform: scale(1) rotate(0deg);
+  }
+  60% {
+    opacity: 0.95;
+    transform: scale(1.04) rotate(0deg);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.3) rotate(0deg);
+  }
+}
+@keyframes hm-ring {
+  0% {
+    opacity: 0.75;
+    transform: scale(0.35);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1);
+  }
+}
+
+/* ── directional damage ─────────────────────────────────────────────────── */
+
+#hud .dmg-dirs {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+}
+
+#hud .dmg-dir {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: calc(var(--u) * 13.5);
+  height: calc(var(--u) * 3.8);
+  margin-left: calc(var(--u) * -6.75);
+  margin-top: calc(var(--u) * -1.9);
+  transform: rotate(var(--angle, 0deg)) translateY(calc(var(--u) * -16));
+}
+
+#hud .dmg-dir-inner {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+}
+#hud .dmg-dir-inner.is-on {
+  animation: dmg-dir 1250ms var(--ease-out) forwards;
+}
+
+#hud .dmg-dir svg {
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: var(--danger);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 calc(var(--u) * 0.5) rgba(0, 0, 0, 0.9));
+  opacity: 0.94;
+}
+
+@keyframes dmg-dir {
+  0% {
+    opacity: 0;
+    transform: scale(1.22) translateY(calc(var(--u) * 0.5));
+  }
+  12% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+  55% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.94) translateY(calc(var(--u) * -0.5));
+  }
+}
+
+/* ── blood vignette ─────────────────────────────────────────────────────── */
+
+#hud .vignette {
+  position: absolute;
+  inset: 0;
+  --hurt: 0;
+  opacity: var(--hurt);
+  background: radial-gradient(
+    ellipse 74% 64% at 50% 50%,
+    rgba(104, 6, 3, 0) 40%,
+    rgba(122, 8, 4, 0.4) 70%,
+    rgba(96, 4, 2, 0.82) 92%,
+    rgba(74, 2, 1, 0.94) 100%
+  );
+  transition: opacity 260ms var(--ease-out);
+}
+/* Regeneration reads as a slow release rather than a snap back to clean. */
+#hud .vignette.is-regen {
+  transition: opacity 1100ms cubic-bezier(0.33, 0, 0.15, 1);
+}
+#hud .vignette.is-critical {
+  animation: vig-pulse 1600ms ease-in-out infinite;
+}
+@keyframes vig-pulse {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.35);
+  }
+}
+
+/* A single hard flash on the frame damage lands, independent of total health. */
+#hud .hurt-flash {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  background: radial-gradient(
+    ellipse 90% 80% at 50% 50%,
+    rgba(255, 40, 24, 0) 40%,
+    rgba(255, 46, 28, 0.42) 100%
+  );
+}
+#hud .hurt-flash.is-hit {
+  animation: hurt-flash 420ms var(--ease-out) forwards;
+}
+@keyframes hurt-flash {
+  0% {
+    opacity: 0.85;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* ── shared panel chrome ────────────────────────────────────────────────── */
+
+#hud .label {
+  font-size: var(--fs-micro);
+  letter-spacing: 0.26em;
+  text-indent: 0.26em;
+  color: var(--ink-2);
+  text-shadow: var(--shadow-text);
+  line-height: 1;
+}
+
+/*
+ * Shared scrim.
+ *
+ * Every widget that sits on unpredictable background gets the same backing: a
+ * dark field sized to that widget's own content, fading to nothing on both
+ * axes so it has no edge of its own to read against a clean sky. Insets are
+ * chosen so the 22%/78% plateau lands on the content and the ramp falls in
+ * the bleed either side of it; --scrim-fade does the same for the horizontal
+ * axis, where the content width varies per widget.
+ */
+#hud .compass-scrim,
+#hud .vitals::before,
+#hud .ammo::before {
+  --scrim-fade: 12%;
+  position: absolute;
+  z-index: -1;
+  background: linear-gradient(
+    180deg,
+    rgba(4, 7, 11, 0) 0%,
+    var(--scrim) 22%,
+    var(--scrim) 78%,
+    rgba(4, 7, 11, 0) 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    #000 var(--scrim-fade),
+    #000 calc(100% - var(--scrim-fade)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    #000 var(--scrim-fade),
+    #000 calc(100% - var(--scrim-fade)),
+    transparent 100%
+  );
+}
+#hud .vitals::before,
+#hud .ammo::before {
+  content: '';
+}
+
+/* ── vitals (bottom left) ───────────────────────────────────────────────── */
+
+#hud .vitals {
+  position: absolute;
+  left: var(--safe);
+  bottom: var(--safe);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: calc(var(--u) * 0.75);
+}
+
+/* Full alpha across the bar, ramping out over the 3u of bleed either side. */
+#hud .vitals::before {
+  --scrim-fade: 10%;
+  inset: calc(var(--u) * -2) calc(var(--u) * -3);
+}
+
+/* Mirrors the ammo block: caption, figure, bar. */
+#hud .vitals-head {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: calc(var(--u) * 0.625);
+}
+
+#hud .vitals-value {
+  display: flex;
+  font-size: var(--fs-lg);
+  line-height: 0.8;
+  letter-spacing: 0.02em;
+  text-shadow: var(--shadow-text);
+  color: var(--ink);
+  transition: color 200ms linear;
+}
+#hud .vitals.is-hurt .vitals-value {
+  color: #ffb9ae;
+}
+#hud .vitals.is-critical .vitals-value {
+  color: var(--danger);
+}
+
+#hud .vitals-bar {
+  position: relative;
+  width: calc(var(--u) * 24);
+  height: calc(var(--u) * 0.5);
+  background: rgba(8, 11, 15, 0.55);
+  box-shadow: var(--shadow-box), inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+  /* Four segments make partial health readable without reading the number. */
+  -webkit-mask-image: repeating-linear-gradient(
+    90deg,
+    #000 0 calc(25% - 2px),
+    transparent calc(25% - 2px) 25%
+  );
+  mask-image: repeating-linear-gradient(
+    90deg,
+    #000 0 calc(25% - 2px),
+    transparent calc(25% - 2px) 25%
+  );
+}
+
+#hud .vitals-fill,
+#hud .vitals-ghost {
+  position: absolute;
+  inset: 0;
+  transform-origin: left center;
+  transform: scaleX(var(--hp, 1));
+}
+/* The ghost trails the real value, so a burst of damage is legible after the
+   fact instead of only during the frame it happened. */
+#hud .vitals-ghost {
+  background: var(--danger-soft);
+  transition: transform 520ms var(--ease-out) 200ms;
+}
+#hud .vitals-fill {
+  background: linear-gradient(90deg, #cfe0f0, #eef4fa);
+  transition: transform 130ms var(--ease-out);
+}
+#hud .vitals.is-critical .vitals-fill {
+  background: linear-gradient(90deg, #ff6a56, #ff9d8c);
+}
+#hud .vitals.is-regen .vitals-fill {
+  background: linear-gradient(90deg, #9fe9c4, #e6fbf0);
+  box-shadow: 0 0 calc(var(--u) * 1.5) rgba(111, 227, 168, 0.65);
+  transition: transform 900ms linear;
+}
+
+/* Stacked above the block rather than inside it: the chips are usually off,
+   and reserving their row in flow would push the health readout up off the
+   safe-area line that the ammo counter sits on. */
+#hud .vitals-status {
+  position: absolute;
+  left: 0;
+  bottom: 100%;
+  margin-bottom: calc(var(--u) * 0.75);
+  display: flex;
+  gap: calc(var(--u) * 0.75);
+  height: calc(var(--u) * 2);
+}
+#hud .chip {
+  font-size: var(--fs-micro);
+  letter-spacing: 0.18em;
+  text-indent: 0.18em;
+  line-height: calc(var(--u) * 2);
+  padding: 0 calc(var(--u) * 0.875);
+  color: var(--ink-2);
+  background: rgba(8, 11, 15, 0.5);
+  box-shadow: var(--shadow-box), inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  opacity: 0;
+  transform: translateY(2px);
+  transition:
+    opacity 140ms var(--ease-out),
+    transform 140ms var(--ease-out);
+}
+#hud .chip.is-on {
+  opacity: 1;
+  transform: none;
+}
+#hud .chip.is-accent {
+  color: var(--accent);
+  box-shadow: var(--shadow-box), inset 0 0 0 1px rgba(255, 157, 46, 0.32);
+}
+
+/* ── ammo (bottom right) ────────────────────────────────────────────────── */
+
+#hud .ammo {
+  position: absolute;
+  right: var(--safe);
+  bottom: var(--safe);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: calc(var(--u) * 0.75);
+}
+
+#hud .ammo::before {
+  --scrim-fade: 12%;
+  inset: calc(var(--u) * -2) calc(var(--u) * -3);
+}
+
+#hud .ammo-meta {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 1.25);
+}
+#hud .ammo-mode {
+  color: var(--ink-2);
+  padding: 0 calc(var(--u) * 0.75);
+  box-shadow: var(--shadow-box), inset 0 0 0 1px rgba(222, 230, 238, 0.18);
+  line-height: calc(var(--u) * 1.9);
+}
+#hud .ammo-name {
+  font-size: var(--fs-sm);
+  letter-spacing: 0.2em;
+  text-indent: 0.2em;
+  color: var(--ink-2);
+  text-shadow: var(--shadow-text);
+  line-height: 1;
+}
+
+#hud .ammo-row {
+  display: flex;
+  align-items: baseline;
+  gap: calc(var(--u) * 0.75);
+  text-shadow: var(--shadow-text);
+}
+
+#hud .ammo-mag {
+  display: flex;
+  font-size: var(--fs-xxl);
+  line-height: 0.78;
+  letter-spacing: 0.01em;
+  transition: color 180ms linear;
+}
+#hud .ammo.is-low .ammo-mag {
+  color: var(--accent);
+}
+#hud .ammo.is-empty .ammo-mag {
+  color: var(--danger);
+  animation: ammo-empty 900ms ease-in-out infinite;
+}
+@keyframes ammo-empty {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+#hud .ammo-sep {
+  font-size: var(--fs-md);
+  color: rgba(222, 230, 238, 0.45);
+  line-height: 1;
+  transform: translateY(calc(var(--u) * -0.25));
+}
+#hud .ammo-reserve {
+  display: flex;
+  font-size: var(--fs-md);
+  color: var(--ink-2);
+  line-height: 1;
+}
+
+/* Fixed-width slots give tabular alignment from a proportional typeface and
+   give each digit something to animate inside. */
+#hud .digit {
+  display: inline-block;
+  width: 0.52em;
+  text-align: center;
+}
+#hud .digit.roll-up {
+  animation: digit-up 130ms var(--ease-out);
+}
+#hud .digit.roll-down {
+  animation: digit-down 130ms var(--ease-out);
+}
+@keyframes digit-up {
+  0% {
+    opacity: 0;
+    transform: translateY(0.34em);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes digit-down {
+  0% {
+    opacity: 0;
+    transform: translateY(-0.34em);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+#hud .ammo-track {
+  position: relative;
+  width: calc(var(--u) * 18);
+  height: 2px;
+  /* Light wash over a dark scrim so the empty track survives both a bright sky
+     and dark ground without the fill needing to be present. */
+  background:
+    linear-gradient(rgba(222, 230, 238, 0.16), rgba(222, 230, 238, 0.16)),
+    rgba(8, 11, 15, 0.55);
+  box-shadow: var(--shadow-box);
+  overflow: hidden;
+}
+#hud .ammo-track-fill {
+  position: absolute;
+  inset: 0;
+  transform-origin: right center;
+  transform: scaleX(var(--mag, 1));
+  background: rgba(222, 230, 238, 0.38);
+  transition: transform 140ms var(--ease-out);
+}
+#hud .ammo.is-low .ammo-track-fill {
+  background: var(--accent);
+}
+#hud .ammo-track-reload {
+  position: absolute;
+  inset: 0;
+  transform-origin: left center;
+  transform: scaleX(0);
+  background: linear-gradient(90deg, var(--accent), #ffd08a);
+  box-shadow: 0 0 calc(var(--u) * 1.25) rgba(255, 157, 46, 0.7);
+  opacity: 0;
+}
+#hud .ammo.is-reloading .ammo-track-fill {
+  opacity: 0;
+}
+#hud .ammo.is-reloading .ammo-track-reload {
+  opacity: 1;
+  animation: reload-fill var(--reload-ms, 2100ms) linear forwards;
+}
+@keyframes reload-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* Above the block for the same reason as the vitals chips: its row is empty
+   most of the time and must not lift the ammo counter off the safe-area line. */
+#hud .ammo-hint {
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  margin-bottom: calc(var(--u) * 0.75);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.28em;
+  text-indent: 0.28em;
+  color: var(--accent);
+  text-shadow: var(--shadow-text);
+  height: calc(var(--u) * 1.5);
+  line-height: calc(var(--u) * 1.5);
+  opacity: 0;
+  transform: translateY(-2px);
+  transition:
+    opacity 140ms var(--ease-out),
+    transform 140ms var(--ease-out);
+}
+#hud .ammo-hint.is-on {
+  opacity: 1;
+  transform: none;
+}
+
+/* ── compass (top centre) ───────────────────────────────────────────────── */
+
+#hud .compass {
+  --ppd: calc(var(--u) * 0.55);
+  position: absolute;
+  top: var(--safe);
+  left: 50%;
+  transform: translateX(-50%);
+  width: calc(var(--u) * 58);
+  height: calc(var(--u) * 4.5);
+}
+
+/*
+ * Sized to the strip, not to the screen edge. The 3u side inset plus a 12%
+ * ramp puts the scrim's horizontal falloff at 9.2u/48.8u, which is where
+ * .compass-window's own mask fades the ticks out — so the backing and the
+ * thing it backs disappear together. Vertically the plateau covers exactly
+ * the labels through the bearing readout, which centres the whole field on
+ * the tick row.
+ */
+#hud .compass-scrim {
+  --scrim-fade: 12%;
+  top: calc(var(--u) * -2.25);
+  right: calc(var(--u) * 3);
+  bottom: calc(var(--u) * -3.5);
+  left: calc(var(--u) * 3);
+}
+
+#hud .compass-window {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 16%, #000 84%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 16%, #000 84%, transparent);
+}
+
+#hud .compass-track {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  height: 100%;
+  width: 0;
+  /* --heading is a unitless bearing in degrees, written once per frame. */
+  transform: translateX(calc(var(--heading, 0) * -1 * var(--ppd)));
+  will-change: transform;
+}
+
+#hud .compass-tick {
+  position: absolute;
+  top: calc(var(--u) * 1.75);
+  width: 1px;
+  height: calc(var(--u) * 0.75);
+  margin-left: -0.5px;
+  background: rgba(222, 230, 238, 0.44);
+  /* Hairlines need their own halo to survive a blown-out sky. */
+  box-shadow: 0 0 2px rgba(2, 4, 7, 0.75);
+}
+#hud .compass-tick--major {
+  top: calc(var(--u) * 1.5);
+  height: calc(var(--u) * 1.25);
+  width: 2px;
+  margin-left: -1px;
+  background: rgba(222, 230, 238, 0.76);
+}
+
+#hud .compass-label {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  font-size: var(--fs-sm);
+  letter-spacing: 0.14em;
+  color: var(--ink-2);
+  text-shadow: var(--shadow-text);
+  line-height: calc(var(--u) * 2.25);
+}
+#hud .compass-label--cardinal {
+  font-size: var(--fs-md);
+  color: var(--ink);
+}
+
+#hud .compass-needle {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 0;
+  height: 0;
+  margin-left: calc(var(--u) * -0.625);
+  border-left: calc(var(--u) * 0.625) solid transparent;
+  border-right: calc(var(--u) * 0.625) solid transparent;
+  border-top: calc(var(--u) * 0.75) solid var(--accent);
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.8));
+}
+
+#hud .compass-bearing {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--u) * -1.25);
+  transform: translateX(-50%);
+  display: flex;
+  font-size: var(--fs-sm);
+  letter-spacing: 0.16em;
+  color: var(--ink);
+  text-shadow: var(--shadow-text);
+}
+
+/* ── killfeed (top right) ───────────────────────────────────────────────── */
+
+/* Stretch, not flex-end: the column takes the width of its widest row and
+   every row fills it, so the feed reads as one block with a shared right
+   edge instead of a stack of ragged pills. */
+#hud .killfeed {
+  position: absolute;
+  right: var(--safe);
+  top: var(--safe);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: calc(var(--u) * 0.5);
+  min-width: calc(var(--u) * 22);
+  max-width: calc(var(--u) * 44);
+}
+
+#hud .kf-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--u) * 1);
+  padding: calc(var(--u) * 0.5) calc(var(--u) * 1.25);
+  background: rgba(6, 9, 13, 0.5);
+  box-shadow: var(--shadow-box), inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.14em;
+  line-height: 1;
+  animation: kf-in 220ms var(--ease-out);
+}
+/* The accent bar alone marks the player's row. It is an inset shadow rather
+   than a border so every row keeps identical content geometry. */
+#hud .kf-row.is-player {
+  background: rgba(28, 17, 6, 0.62);
+  box-shadow:
+    var(--shadow-box),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.05),
+    inset calc(var(--u) * 0.25) 0 0 var(--accent);
+}
+#hud .kf-row.is-out {
+  animation: kf-out 260ms var(--ease-in) forwards;
+}
+
+#hud .kf-name {
+  color: var(--ink-2);
+  text-shadow: var(--shadow-text);
+  white-space: nowrap;
+}
+#hud .kf-row.is-player .kf-killer {
+  color: var(--accent);
+}
+#hud .kf-victim {
+  color: var(--ink);
+}
+
+#hud .kf-icons {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.625);
+  color: var(--ink-3);
+}
+#hud .kf-icons svg {
+  height: calc(var(--u) * 1.5);
+  fill: currentColor;
+}
+#hud .kf-icons .kf-skull {
+  color: var(--accent);
+  height: calc(var(--u) * 1.75);
+}
+
+@keyframes kf-in {
+  0% {
+    opacity: 0;
+    transform: translateX(calc(var(--u) * 2));
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes kf-out {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(calc(var(--u) * 1.5));
+  }
+}
+
+/* ── notifications ──────────────────────────────────────────────────────── */
+
+#hud .notices {
+  position: absolute;
+  left: 50%;
+  top: 64%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--u) * 0.75);
+}
+#hud .notice {
+  font-size: var(--fs-sm);
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  color: var(--ink);
+  text-shadow: var(--shadow-text);
+  padding: calc(var(--u) * 0.625) calc(var(--u) * 2);
+  background: rgba(6, 9, 13, 0.42);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  animation: notice-in 200ms var(--ease-out);
+}
+#hud .notice.is-out {
+  animation: notice-out 240ms var(--ease-in) forwards;
+}
+@keyframes notice-in {
+  0% {
+    opacity: 0;
+    transform: translateY(calc(var(--u) * 0.75)) scale(0.98);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes notice-out {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(calc(var(--u) * -0.5));
+  }
+}
+
+/* ── settings ───────────────────────────────────────────────────────────── */
+
+#hud .settings {
+  position: absolute;
+  inset: 0;
+  z-index: 95; /* above the shell's start prompt, below its loader */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(4, 6, 10, 0.72);
+  backdrop-filter: blur(14px) saturate(0.72);
+  -webkit-backdrop-filter: blur(14px) saturate(0.72);
+  font-family: var(--font-ui);
+  cursor: default;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity 160ms var(--ease-out),
+    visibility 0s linear 160ms;
+}
+#hud .settings.is-open {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition:
+    opacity 160ms var(--ease-out),
+    visibility 0s;
+}
+
+/* Height follows the active tab rather than stranding sparse tabs in a sea of
+   empty panel; the dense tab scrolls instead. */
+#hud .settings-panel {
+  width: min(calc(var(--u) * 142), 92vw);
+  height: auto;
+  min-height: calc(var(--u) * 44);
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, rgba(15, 20, 27, 0.96), rgba(9, 12, 17, 0.97));
+  box-shadow:
+    0 calc(var(--u) * 4) calc(var(--u) * 10) rgba(0, 0, 0, 0.6),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+  transform: translateY(calc(var(--u) * 1.5)) scale(0.994);
+  transition: transform 200ms var(--ease-out);
+}
+#hud .settings.is-open .settings-panel {
+  transform: none;
+}
+#hud .settings-panel::before {
+  content: '';
+  display: block;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent), rgba(255, 157, 46, 0));
+  flex: 0 0 auto;
+}
+
+#hud .settings-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-end;
+  gap: calc(var(--u) * 3);
+  padding: calc(var(--u) * 2.5) calc(var(--u) * 3.5) 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+#hud .settings-title {
+  font-family: var(--font-display);
+  font-size: var(--fs-md);
+  letter-spacing: 0.34em;
+  text-indent: 0.34em;
+  color: var(--ink);
+  padding-bottom: calc(var(--u) * 1.5);
+}
+#hud .settings-tabs {
+  display: flex;
+  gap: calc(var(--u) * 0.25);
+  margin-left: auto;
+}
+#hud .tab {
+  appearance: none;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--fs-sm);
+  letter-spacing: 0.2em;
+  text-indent: 0.2em;
+  color: var(--ink-3);
+  padding: calc(var(--u) * 1) calc(var(--u) * 1.75) calc(var(--u) * 1.25);
+  cursor: pointer;
+  position: relative;
+  transition: color 120ms linear;
+}
+#hud .tab:hover {
+  color: var(--ink-2);
+}
+#hud .tab.is-active {
+  color: var(--ink);
+}
+#hud .tab.is-active::after {
+  content: '';
+  position: absolute;
+  left: calc(var(--u) * 0.75);
+  right: calc(var(--u) * 0.75);
+  bottom: -1px;
+  height: 2px;
+  background: var(--accent);
+}
+#hud .tab:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -2px;
+}
+
+#hud .settings-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: calc(var(--u) * 2.5) calc(var(--u) * 3.5) calc(var(--u) * 3);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+#hud .settings-body::-webkit-scrollbar {
+  width: 6px;
+}
+#hud .settings-body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+#hud .settings-page {
+  display: none;
+}
+/* Multi-column rather than grid so a short group is followed immediately by
+   the next one instead of leaving a row-height hole. */
+#hud .settings-page.is-active {
+  display: block;
+  columns: 2;
+  column-gap: calc(var(--u) * 5);
+  orphans: 1;
+  widows: 1;
+}
+
+#hud .settings-group {
+  break-inside: avoid;
+  margin-bottom: calc(var(--u) * 2.5);
+}
+#hud .settings-group-title {
+  font-family: var(--font-display);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.26em;
+  text-indent: 0.26em;
+  color: var(--accent);
+  padding-bottom: calc(var(--u) * 1);
+  margin-bottom: calc(var(--u) * 0.5);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+#hud .row {
+  display: grid;
+  grid-template-columns: 1fr calc(var(--u) * 22);
+  align-items: center;
+  gap: calc(var(--u) * 2);
+  min-height: calc(var(--u) * 4.5);
+  padding: calc(var(--u) * 0.5) 0;
+}
+#hud .row-label {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--ink-2);
+}
+#hud .row:hover .row-label {
+  color: var(--ink);
+}
+#hud .row-control {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: calc(var(--u) * 1.25);
+}
+#hud .row-value {
+  font-family: var(--font-display);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.08em;
+  color: var(--ink);
+  min-width: calc(var(--u) * 5.5);
+  text-align: right;
+}
+
+#hud .switch {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  width: calc(var(--u) * 5);
+  height: calc(var(--u) * 2.25);
+  background: rgba(0, 0, 0, 0.38);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.11);
+  position: relative;
+  cursor: pointer;
+  transition: background 140ms var(--ease-out);
+  flex: 0 0 auto;
+}
+#hud .switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: calc(var(--u) * 2.25 - 4px);
+  height: calc(var(--u) * 2.25 - 4px);
+  background: rgba(222, 230, 238, 0.42);
+  transition:
+    transform 160ms var(--ease-out),
+    background 140ms linear;
+}
+#hud .switch.is-on {
+  background: rgba(255, 157, 46, 0.22);
+  box-shadow: inset 0 0 0 1px rgba(255, 157, 46, 0.45);
+}
+#hud .switch.is-on::after {
+  transform: translateX(calc(var(--u) * 2.75));
+  background: var(--accent);
+}
+#hud .switch:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+
+#hud .segmented {
+  display: flex;
+  flex: 1 1 auto;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+#hud .seg {
+  appearance: none;
+  border: 0;
+  flex: 1 1 0;
+  background: none;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.16em;
+  text-indent: 0.16em;
+  color: var(--ink-3);
+  padding: calc(var(--u) * 0.75) 0;
+  cursor: pointer;
+  transition:
+    color 120ms linear,
+    background 120ms linear;
+}
+#hud .seg:hover {
+  color: var(--ink-2);
+  background: rgba(255, 255, 255, 0.04);
+}
+#hud .seg.is-active {
+  color: #12161c;
+  background: var(--accent);
+}
+#hud .seg:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+#hud .slider {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: 1 1 auto;
+  height: calc(var(--u) * 2);
+  background: none;
+  cursor: pointer;
+}
+#hud .slider::-webkit-slider-runnable-track {
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    var(--accent) 0 calc(var(--fill, 0) * 100%),
+    rgba(255, 255, 255, 0.12) calc(var(--fill, 0) * 100%) 100%
+  );
+}
+#hud .slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: calc(var(--u) * 0.75);
+  height: calc(var(--u) * 1.75);
+  margin-top: calc(var(--u) * -0.875 + 1px);
+  background: var(--ink);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  transition: transform 120ms var(--ease-out);
+}
+#hud .slider:hover::-webkit-slider-thumb {
+  transform: scaleY(1.14);
+  background: #fff;
+}
+#hud .slider:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+
+#hud .settings-foot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 1.5);
+  padding: calc(var(--u) * 2) calc(var(--u) * 3.5);
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(0, 0, 0, 0.22);
+}
+#hud .settings-hint {
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  letter-spacing: 0.06em;
+  margin-right: auto;
+}
+#hud .settings-hint b {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--ink-2);
+}
+
+#hud .btn {
+  appearance: none;
+  border: 0;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--fs-xs);
+  letter-spacing: 0.24em;
+  text-indent: 0.24em;
+  padding: calc(var(--u) * 1.25) calc(var(--u) * 3);
+  color: var(--ink-2);
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+  cursor: pointer;
+  transition:
+    color 120ms linear,
+    background 120ms linear;
+}
+#hud .btn:hover {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.1);
+}
+#hud .btn--primary {
+  color: #12161c;
+  background: var(--accent);
+  box-shadow: none;
+}
+#hud .btn--primary:hover {
+  color: #12161c;
+  background: #ffb257;
+}
+#hud .btn:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}

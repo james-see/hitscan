@@ -1,0 +1,704 @@
+{
+  "version": 1,
+  "generatedAt": "2026-07-26",
+  "note": "Procedurally synthesised by tools/audio/generate.mjs. No third-party audio.",
+  "cues": {
+    "weapon.rifle.fire.close": {
+      "group": "weapon",
+      "gain": 1,
+      "loop": false,
+      "variants": [
+        {
+          "url": "/audio/weapon_rifle_fire_close_1.wav",
+          "durationMs": 317,
+          "sampleRate": 48000,
+          "channels": 1
+        },
+        {
+          "url": "/audio/weapon_rifle_fire_close_2.wav",
+          "durationMs": 333,
+          "sampleRate": 48000,
+          "channels": 1
+        },
+        {
+          "url": "/audio/weapon_rifle_fire_close_3.wav",
+          "durationMs": 334,
+          "sampleRate": 48000,
+          "channels": 1
+        },
+        {
+          "url": "/audio/weapon_rifle_fire_close_4.wav",
+          "durationMs": 323,
+          "sampleRate": 48000,
+          "channels": 1
+        }
+      ]
+    },
+    "weapon.rifle.fire.distant": {
+      "group": "weapon",
+      "gain": 0.9,
+      "loop": false,
+      "variants": [
+        {
+          "url": "/audio/weapon_rifle_fire_distant_1.wav",
+          "durationMs": 956,
+          "sampleRate": 48000,
+          "channels": 1
+        },
+        {
+          "url": "/audio/weapon_rifle_fire_distant_2.wav",
+          "durationMs": 962,
+          "sampleRate": 48000,
+          "channels": 1
+        },
+        {
+          "url": "/audio/weapon_rifle_fire_distant_3.wav",
+          "durationMs": 1087,
+          "sampleRate": 48000,
+          "channels": 1
+        }
+      ]
+    },
+    "weapon.rifle.dry": {
+      "group": "weapon",
+      "gain": 0.5,
+      "loop": false,
+      "variants": [
+        {
+          "url": "/audio/weapon_rifle_dry_1.wav",
+          "durationMs": 93,
+          "sampleRate": 48000,
+          "channels": 1
+        },
+        {
+          "url": "/audio/weapon_rifle_dry_2.wav",
+          "durationMs": 92,
+          "sampleRate": 48000,
+          "channels": 1
+        }
+      ]
+    },
+    "weapon.rifle.mag.out": {
+      "group": "weapon",
+      "gain": 0.55,
+      "loop": false,
+      "variants": [
+        {
+          "url": "/audio/weapon_rifle_mag_out.wav",
+          "durationMs": 282,
+          "sampleRate": 48000,
+          "channels": 1
+        }
+      ]
+    },
+    "weapon.rifle.mag.in": {
+      "group": "weapon",
+      "gain": 0.6,
+      "loop": false,
+      "variants": [
+        {
+          "url": "/audio/weapon_rifle_mag_in.wav",
+          "durationMs": 278,
+          "sampleRate": 48000,
+          "channels": 1
+        }
+      ]
+    },
+    "weapon.rifle.charge.pull": {
+      "group": "weapon",
+      "gain": 0.5,
+      "loop": false,
+      "variants": [
+        {
+          "url": "/audio/weapon_rifle_charge_pull.wav",
+          "durationMs": 214,
+          "sampleRate": 48000,
+          "channels": 1
+        }
+      ]
+    },
+    "weapon.rifle.charge.release": {
+      "group": "weapon",
+      "gain": 0.6,
+      "loop": false,
+      "variants": [
+        {
+          "url": "/audio/weapon_rifle_charge_release.wav",
+          "durationMs": 170,
+          "sampleRate": 48000,
+          "channels": 1
+        }
+      ]
+    },
+    "weapon.rifle.ads.in": {
+      "group": "weapon",
+      "gain": 0.35,
+      "loop": false,
+      "variants": [
+        {
+          "url": "/audio/weapon_rifle_ads_in.wav",
+          "durationMs": 176,
+          "sampleRate": 48000,
+          "channels": 1
+        }
+      ]
+    },
+    "weapon.rifle.ads.out": {
+      "group": "weapon",
+      "gain": 0.3,
+      "loop": false,
+      "variants": [
+        {
+          "url": "/audio/weapon_rifle_ads_out.wav",
+          "durationMs": 176,
+          "sampleRate": 48000,
+          "channels": 1
+        }
+      ]
+    },
+    "impact.concrete": {
+      "group": "impact",
+      "gain": 0.75,
+      "loop": false,
+      "variants": [
+        {
+          "url": "/audio/impact_concrete_1.wav",
+          "durationMs": 196,
+          "sampleRate": 48000,
+          "channels": 1
+        },
+        {
+          "url": "/audio/impact_concrete_2.wav",
+          "durationMs": 202,
+          "sampleRate": 48000,
+          "channels": 1
+        },
+        {
+          "url": "/audio/impact_concrete_3.wav",
+          "durationMs": 202,
+          "sampleRate": 48000,
+          "channels": 1
+        }
+      ]
+    },
+    "impact.metal": {
+      "group": "impact",
+      "gain": 0.7,
+      "loop": false,
+      "variants": [
+        {
+          "url": "/audio/impact_metal_1.wav",
+          "durationMs": 512,
+          "sampleRate": 48000,
+          "channels": 1
+        },
+        {
+          "url": "/audio/impact_metal_2.wav",
+          "durationMs": 512,
+          "sampleRate": 48000,
+          "channels": 1
+        },
+        {
+          "url": "/audio/impact_metal_3.wav",
+          "durationMs": 512,
+          "sampleRate": 48000,
+          "channels": 1
+        }
+      ]
+    },
+    "impact.wood": {
+      "group": "impact",
+      "gain": 0.7,
+      "loop": false,
+      "variants": [
+        {
+          "url": "/audio/impact_wood_1.wav",
+          "durationMs": 212,
+          "sampleRate": 48000,
+          "channels": 1
+        },
+        {
+          "url": "/audio/impact_wood_2.wav",
+          "durationMs": 212,
+          "sampleRate": 48000,
+          "channels": 1
+        },
+        {
+          "url": "/audio/impact_wood_3.wav",
+          "durationMs": 212,
+          "sampleRate": 48000,
+          "channels": 1
+        }
+      ]
+    },
+    "impact.dirt": {
+      "group": "impact",
+      "gain": 0.65,
+      "loop": false,
+      "variants": [
+        {
+          "url": "/audio/impact_dirt_1.wav",
+          "durationMs": 205,
+          "sampleRate": 48000,
+          "channels": 1
+        },
+        {
+          "url": "/audio/impact_dirt_2.wav",
+          "durationMs": 213,
+          "sampleRate": 48000,
+          "channels": 1
+        }
+      ]
+    },
+    "impact.sand": {
+      "group": "impact",
+      "gain": 0.6,
+      "loop": false,
+      "variants": [
+        {
+          "url": "/audio/impact_sand_1.wav",
+          "durationMs": 155,
+          "sampleRate": 48000,
+          "channels": 1
+        },
+        {
+          "url": "/audio/impact_sand_2.wav",
+          "durationMs": 153,
+          "sampleRate": 48000,
+          "channels": 1
+        }
+      ]
+    },
+    "impact.glass": {
+      "group": "impact",
+      "gain": 0.7,
+      "loop": false,
+      "variants": [
+        {
+          "url": "/audio/impact_glass_1.wav",
+          "durationMs": 390,
+          "sampleRate": 48000,
+          "channels": 1
+        },
+        {
+          "url": "/audio/impact_glass_2.wav",
+          "durationMs": 391,
+          "sampleRate": 48000,
+          "channels": 1
+        }
+      ]
+    },
+    "impact.water": {
+      "group": "impact",
+      "gain": 0.65,
+      "loop": false,
+      "variants": [
+        {
+          "url": "/audio/impact_water_1.wav",
+          "durationMs": 262,
+          "sampleRate": 48000,
+          "channels": 1
+        },
+        {
+          "url": "/audio/impact_water_2.wav",
+          "durationMs": 272,
+          "sampleRate": 48000,
+          "channels": 1
+        }
+      ]
+    },
+    "impact.fabric": {
+      "group": "impact",
+      "gain": 0.55,
+      "loop": false,
+      "variants": [
+        {
+          "url": "/audio/impact_fabric_1.wav",
+          "durationMs": 161,
+          "sampleRate": 48000,
+          "channels": 1
+        },
+        {
+          "url": "/audio/impact_fabric_2.wav",
+          "durationMs": 164,
+          "sampleRate": 48000,
+          "channels": 1
+        }
+      ]
+    },
+    "impact.foliage": {
+      "group": "impact",
+      "gain": 0.6,
+      "loop": false,
+      "variants": [
+        {
+          "url": "/audio/impact_foliage_1.wav",
+          "durationMs": 292,
+          "sampleRate": 48000,
+          "channels": 1
+        },
+        {
+          "url": "/audio/impact_foliage_2.wav",
+          "durationMs": 293,
+          "sampleRate": 48000,
+          "channels": 1
+        }
+      ]
+    },
+    "impact.flesh": {
+      "group": "impact",
+      "gain": 0.8,
+      "loop": false,
+      "variants": [
+        {
+          "url": "/audio/impact_flesh_1.wav",
+          "durationMs": 134,
+          "sampleRate": 48000,
+          "channels": 1
+        },
+        {
+          "url": "/audio/impact_flesh_2.wav",
+          "durationMs": 134,
+          "sampleRate": 48000,
+          "channels": 1
+        },
+        {
+          "url": "/audio/impact_flesh_3.wav",
+          "durationMs": 133,
+          "sampleRate": 48000,
+          "channels": 1
+        }
+      ]
+    },
+    "step.concrete": {
+      "group": "step",
+      "gain": 0.4,
+      "loop": false,
+      "variants": [
+        {
+          "url": "/audio/step_concrete_1.wav",
+          "durationMs": 122,
+          "sampleRate": 24000,
+          "channels": 1
+        },
+        {
+          "url": "/audio/step_concrete_2.wav",
+          "durationMs": 119,
+          "sampleRate": 24000,
+          "channels": 1
+        },
+        {
+          "url": "/audio/step_concrete_3.wav",
+          "durationMs": 118,
+          "sampleRate": 24000,
+          "channels": 1
+        }
+      ]
+    },
+    "step.metal": {
+      "group": "step",
+      "gain": 0.4,
+      "loop": false,
+      "variants": [
+        {
+          "url": "/audio/step_metal_1.wav",
+          "durationMs": 232,
+          "sampleRate": 24000,
+          "channels": 1
+        },
+        {
+          "url": "/audio/step_metal_2.wav",
+          "durationMs": 232,
+          "sampleRate": 24000,
+          "channels": 1
+        },
+        {
+          "url": "/audio/step_metal_3.wav",
+          "durationMs": 232,
+          "sampleRate": 24000,
+          "channels": 1
+        }
+      ]
+    },
+    "step.wood": {
+      "group": "step",
+      "gain": 0.4,
+      "loop": false,
+      "variants": [
+        {
+          "url": "/audio/step_wood_1.wav",
+          "durationMs": 215,
+          "sampleRate": 24000,
+          "channels": 1
+        },
+        {
+          "url": "/audio/step_wood_2.wav",
+          "durationMs": 212,
+          "sampleRate": 24000,
+          "channels": 1
+        },
+        {
+          "url": "/audio/step_wood_3.wav",
+          "durationMs": 213,
+          "sampleRate": 24000,
+          "channels": 1
+        }
+      ]
+    },
+    "step.dirt": {
+      "group": "step",
+      "gain": 0.38,
+      "loop": false,
+      "variants": [
+        {
+          "url": "/audio/step_dirt_1.wav",
+          "durationMs": 152,
+          "sampleRate": 24000,
+          "channels": 1
+        },
+        {
+          "url": "/audio/step_dirt_2.wav",
+          "durationMs": 153,
+          "sampleRate": 24000,
+          "channels": 1
+        }
+      ]
+    },
+    "step.sand": {
+      "group": "step",
+      "gain": 0.34,
+      "loop": false,
+      "variants": [
+        {
+          "url": "/audio/step_sand_1.wav",
+          "durationMs": 175,
+          "sampleRate": 24000,
+          "channels": 1
+        },
+        {
+          "url": "/audio/step_sand_2.wav",
+          "durationMs": 173,
+          "sampleRate": 24000,
+          "channels": 1
+        }
+      ]
+    },
+    "step.water": {
+      "group": "step",
+      "gain": 0.42,
+      "loop": false,
+      "variants": [
+        {
+          "url": "/audio/step_water_1.wav",
+          "durationMs": 212,
+          "sampleRate": 24000,
+          "channels": 1
+        },
+        {
+          "url": "/audio/step_water_2.wav",
+          "durationMs": 221,
+          "sampleRate": 24000,
+          "channels": 1
+        }
+      ]
+    },
+    "step.foliage": {
+      "group": "step",
+      "gain": 0.36,
+      "loop": false,
+      "variants": [
+        {
+          "url": "/audio/step_foliage_1.wav",
+          "durationMs": 232,
+          "sampleRate": 24000,
+          "channels": 1
+        },
+        {
+          "url": "/audio/step_foliage_2.wav",
+          "durationMs": 240,
+          "sampleRate": 24000,
+          "channels": 1
+        }
+      ]
+    },
+    "shell.bounce": {
+      "group": "shell",
+      "gain": 0.3,
+      "loop": false,
+      "variants": [
+        {
+          "url": "/audio/shell_bounce_1.wav",
+          "durationMs": 298,
+          "sampleRate": 48000,
+          "channels": 1
+        },
+        {
+          "url": "/audio/shell_bounce_2.wav",
+          "durationMs": 276,
+          "sampleRate": 48000,
+          "channels": 1
+        },
+        {
+          "url": "/audio/shell_bounce_3.wav",
+          "durationMs": 288,
+          "sampleRate": 48000,
+          "channels": 1
+        },
+        {
+          "url": "/audio/shell_bounce_4.wav",
+          "durationMs": 325,
+          "sampleRate": 48000,
+          "channels": 1
+        }
+      ]
+    },
+    "ui.hit": {
+      "group": "ui",
+      "gain": 0.35,
+      "loop": false,
+      "variants": [
+        {
+          "url": "/audio/ui_hit.wav",
+          "durationMs": 72,
+          "sampleRate": 48000,
+          "channels": 1
+        }
+      ]
+    },
+    "ui.hit.head": {
+      "group": "ui",
+      "gain": 0.4,
+      "loop": false,
+      "variants": [
+        {
+          "url": "/audio/ui_hit_head.wav",
+          "durationMs": 97,
+          "sampleRate": 48000,
+          "channels": 1
+        }
+      ]
+    },
+    "ui.hit.kill": {
+      "group": "ui",
+      "gain": 0.45,
+      "loop": false,
+      "variants": [
+        {
+          "url": "/audio/ui_hit_kill.wav",
+          "durationMs": 127,
+          "sampleRate": 48000,
+          "channels": 1
+        }
+      ]
+    },
+    "player.land.soft": {
+      "group": "player",
+      "gain": 0.5,
+      "loop": false,
+      "variants": [
+        {
+          "url": "/audio/player_land_soft_1.wav",
+          "durationMs": 318,
+          "sampleRate": 48000,
+          "channels": 1
+        },
+        {
+          "url": "/audio/player_land_soft_2.wav",
+          "durationMs": 318,
+          "sampleRate": 48000,
+          "channels": 1
+        }
+      ]
+    },
+    "player.land.hard": {
+      "group": "player",
+      "gain": 0.8,
+      "loop": false,
+      "variants": [
+        {
+          "url": "/audio/player_land_hard_1.wav",
+          "durationMs": 345,
+          "sampleRate": 48000,
+          "channels": 1
+        },
+        {
+          "url": "/audio/player_land_hard_2.wav",
+          "durationMs": 346,
+          "sampleRate": 48000,
+          "channels": 1
+        }
+      ]
+    },
+    "player.jump": {
+      "group": "player",
+      "gain": 0.4,
+      "loop": false,
+      "variants": [
+        {
+          "url": "/audio/player_jump.wav",
+          "durationMs": 174,
+          "sampleRate": 48000,
+          "channels": 1
+        }
+      ]
+    },
+    "player.hurt": {
+      "group": "player",
+      "gain": 0.85,
+      "loop": false,
+      "variants": [
+        {
+          "url": "/audio/player_hurt_1.wav",
+          "durationMs": 462,
+          "sampleRate": 48000,
+          "channels": 1
+        },
+        {
+          "url": "/audio/player_hurt_2.wav",
+          "durationMs": 462,
+          "sampleRate": 48000,
+          "channels": 1
+        }
+      ]
+    },
+    "ambience.courtyard": {
+      "group": "ambience",
+      "gain": 1,
+      "loop": true,
+      "variants": [
+        {
+          "url": "/audio/ambience_courtyard.wav",
+          "durationMs": 6000,
+          "sampleRate": 24000,
+          "channels": 1
+        }
+      ]
+    },
+    "ir.courtyard": {
+      "group": "ir",
+      "gain": 1,
+      "loop": false,
+      "variants": [
+        {
+          "url": "/audio/ir_courtyard.wav",
+          "durationMs": 1667,
+          "sampleRate": 24000,
+          "channels": 2
+        }
+      ]
+    },
+    "ir.interior": {
+      "group": "ir",
+      "gain": 1,
+      "loop": false,
+      "variants": [
+        {
+          "url": "/audio/ir_interior.wav",
+          "durationMs": 572,
+          "sampleRate": 24000,
+          "channels": 2
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+
+# Downloaded source assets, before processing. Regenerate with npm run assets:fetch.
+.assetcache/
+
+# Critic harness output.
+captures/
+
+# Reference images for blind comparison. Never committed: these are
+# third-party screenshots and are not ours to redistribute.
+refs/
+
+# Frozen tree served by the capture harness
+.capture-snapshot/

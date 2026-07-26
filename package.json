@@ -1,0 +1,36 @@
+{
+  "name": "hitscan",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A AAA-grade first-person shooter in the browser, built on Three.js and WebGL2.",
+  "license": "AGPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/james-see/hitscan.git"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --port 4173 --strictPort",
+    "typecheck": "tsc --noEmit",
+    "assets:fetch": "node tools/assets/fetch.mjs",
+    "assets:pack": "node tools/assets/pack.mjs",
+    "assets:all": "npm run assets:fetch && npm run assets:pack",
+    "capture": "node tools/critic/capture.mjs",
+    "critic": "node tools/critic/run.mjs",
+    "gate": "node tools/critic/gate.mjs"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.19.3",
+    "three": "^0.185.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "@types/three": "^0.185.1",
+    "playwright": "^1.62.0",
+    "sharp": "^0.35.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.1.5"
+  }
+}
