@@ -18,6 +18,12 @@ interface RenderDebugApi {
   setFog(options: Record<string, number>): void;
   /** Live tuning for the occlusion trace. */
   setOcclusion(options: Record<string, number>): void;
+  /**
+   * Rasterises the viewmodel into the G-buffer, flagged in attachment 1's `.a`.
+   * Off until the post chain rejects the flag; see
+   * `ForwardPipeline.setViewmodelGBuffer`.
+   */
+  setViewmodelGBuffer(enabled: boolean): void;
 }
 
 declare global {
@@ -116,7 +122,16 @@ export class RenderModule implements GameModule {
         exposure: () => this.exposureReport,
         setFog: (options) => this.#atmosphere.configure(options),
         setOcclusion: (options) => Object.assign(this.#occlusion ?? {}, options),
+        setViewmodelGBuffer: (enabled) => pipeline.setViewmodelGBuffer(enabled),
       };
+
+      // `?vmgbuf=1` turns the viewmodel write on from boot, which is the only
+      // way the capture harness can photograph it: the flag has to be set
+      // before the first frame the harness keeps, and the harness cannot run
+      // script between boot and capture.
+      if (new URLSearchParams(window.location.search).get('vmgbuf') === '1') {
+        pipeline.setViewmodelGBuffer(true);
+      }
 
       // `?gbuf=metalness` and friends put a raw G-buffer channel on screen from
       // boot. This is what makes the encoding contract measurable through the

@@ -38,6 +38,24 @@ import { isLitMaterial } from './SceneMaterials.ts';
  * result is folded into scene colour before TAA rather than after it, the
  * temporal resolve the pipeline already pays for does the denoising, and no
  * separate accumulation buffer or history rejection is needed.
+ *
+ * THE VIEWMODEL IS EXCLUDED BY FRAME ORDER, NOT BY A TEST
+ *
+ * The first-person weapon is rasterised into the G-buffer flagged (attachment 1
+ * `.a`, see `DepthPrepass.renderViewmodel`) and must not appear in this trace:
+ * it is drawn with its own, far narrower field of view, so reconstructing its
+ * position from a pixel coordinate and this camera's inverse projection
+ * stretches it by roughly a factor of two, and a weapon that casts occlusion
+ * into the world while receiving none is a dark halo bought for nothing.
+ *
+ * The pipeline arranges that by running this pass BEFORE the viewmodel is
+ * written, which is why there is no flag test anywhere below. Do not reorder
+ * the two without putting one back, and do not assume the flag test would be
+ * equivalent if you did — it is measurably worse. Skipping a tap that lands on
+ * the weapon also hides whatever world geometry the weapon is standing in
+ * front of, and the long radius reaches several hundred pixels, so on the lane
+ * shots that lifted occlusion across about 9% of the frame in a soft halo the
+ * shape of the rifle. Being absent from the buffer has neither problem.
  */
 export interface OcclusionOptions {
   /** Sample budget, mapped onto slice and step counts. */

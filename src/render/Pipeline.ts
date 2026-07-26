@@ -48,6 +48,17 @@ export class ForwardPipeline implements RenderPipeline {
   #unjittered = new THREE.Matrix4();
   #initialised = new Set<string>();
 
+  /**
+   * The viewmodel camera's own unjittered view-projections, tracked whether or
+   * not the weapon is being written to the G-buffer. Keeping the history warm
+   * costs two matrix products and means enabling the write mid-session cannot
+   * produce one frame of motion vectors differenced against a stale matrix.
+   */
+  #viewmodelViewProjection = new THREE.Matrix4();
+  #viewmodelPrevViewProjection = new THREE.Matrix4();
+  #viewmodelUnjittered = new THREE.Matrix4();
+  #viewmodelGBuffer = false;
+
   #prepass = new DepthPrepass();
   #shadows: CascadedShadowMaps | null = null;
   #occlusion: ScreenSpaceOcclusion | null = null;
@@ -153,6 +164,32 @@ export class ForwardPipeline implements RenderPipeline {
   }
 
   /**
+   * Rasterises the first-person weapon into the G-buffer, flagged.
+   *
+   * OFF BY DEFAULT, AND THIS IS THE INTERLOCK, NOT A SETTING.
+   *
+   * The flag is only half a feature. Until the reflection pass rejects it, that
+   * pass sees the weapon as world geometry viewed through the wrong projection
+   * and traces a stretched rifle across the floor. Measured on the lane shot
+   * with the frame otherwise held still, turning this on moved 1.4% of pixels
+   * by up to 72/255; disabling reflections dropped the worst pixel to 7/255,
+   * and disabling reflections and temporal AA together made the write a
+   * no-op to the byte. So there is exactly one outstanding consumer, it is not
+   * in this module, and the error it produces is large.
+   *
+   * The occlusion trace, which is the other pass that must not see the weapon,
+   * is handled instead by frame order — it runs before the write. See
+   * `ScreenSpaceOcclusion`'s header.
+   */
+  setViewmodelGBuffer(enabled: boolean): void {
+    this.#viewmodelGBuffer = enabled;
+  }
+
+  get viewmodelGBuffer(): boolean {
+    return this.#viewmodelGBuffer;
+  }
+
+  /**
    * Permanently skips a registered pass by name.
    *
    * Distinct from `pass.enabled`, which is owned by whichever module built
@@ -215,6 +252,19 @@ export class ForwardPipeline implements RenderPipeline {
     this.#unjittered.elements[9]! -= this.#jitter.y;
     this.#viewProjection.multiplyMatrices(this.#unjittered, camera.matrixWorldInverse);
 
+    const viewmodelCamera = ctx.viewmodelCamera;
+    const viewmodelScene = ctx.viewmodelScene;
+    const viewmodelVisible = viewmodelScene.visible && viewmodelScene.children.length > 0;
+    viewmodelCamera.updateMatrixWorld();
+    this.#viewmodelPrevViewProjection.copy(this.#viewmodelViewProjection);
+    this.#viewmodelUnjittered.copy(viewmodelCamera.projectionMatrix);
+    this.#viewmodelUnjittered.elements[8]! -= this.#jitter.x;
+    this.#viewmodelUnjittered.elements[9]! -= this.#jitter.y;
+    this.#viewmodelViewProjection.multiplyMatrices(
+      this.#viewmodelUnjittered,
+      viewmodelCamera.matrixWorldInverse
+    );
+
     // -- shadows --------------------------------------------------------
     this.#shadows?.update(camera);
     this.#shadows?.render(renderer, ctx.scene);
@@ -233,7 +283,34 @@ export class ForwardPipeline implements RenderPipeline {
     // -- screen-space occlusion -----------------------------------------
     // Between the prepass and the forward pass: the G-buffer it reads is
     // complete, and the shading that consumes it has not started.
+    //
+    // ALSO BEFORE THE VIEWMODEL, AND THAT ORDERING IS LOAD-BEARING. The
+    // occlusion trace must not see the weapon, and running first is a strictly
+    // better way to arrange that than testing the flag per tap. Testing it
+    // means a tap that lands on the weapon is skipped, so the world geometry
+    // the weapon is standing in front of becomes invisible to the trace as
+    // well: measured on the lane shots, that lifted occlusion over about 9% of
+    // the frame in a wide halo around the rifle, because the long radius
+    // reaches hundreds of pixels. Sequencing it away costs nothing, needs no
+    // per-tap fetch, and leaves this buffer byte-identical to a frame with no
+    // viewmodel write at all. See `ScreenSpaceOcclusion`'s header.
     this.#occlusion?.render(renderer, camera, frame.frame);
+
+    // -- viewmodel into the G-buffer ------------------------------------
+    // Depth-tests against the world, so it has to follow the world prepass.
+    // See `DepthPrepass.renderViewmodel` for the encoding and for why the
+    // weapon is written at all when most consumers reject it.
+    if (this.#viewmodelGBuffer && viewmodelVisible) {
+      this.#prepass.renderViewmodel(
+        renderer,
+        viewmodelScene,
+        viewmodelCamera,
+        camera,
+        this.gbuffer,
+        this.#viewmodelPrevViewProjection,
+        this.#jitter
+      );
+    }
 
     // -- main scene -----------------------------------------------------
     renderer.setRenderTarget(this.#hdr);
@@ -344,13 +421,18 @@ export class ForwardPipeline implements RenderPipeline {
               c = vec3(texture2D(tOcclusion, vUv).r);
             } else if (uMode == 5) {
               c = vec3(texture2D(tOcclusion, vUv).g);
-            } else {
+            } else if (uMode == 6) {
               // Raw metalness, unscaled, so the value can be read straight off
               // the image and counted. Deliberately not flagging the sky:
               // background metalness is genuinely zero and must be countable
               // as such, so a black pixel here means "dielectric or nothing"
               // and that is the honest answer.
               c = vec3(texture2D(tVelocity, vUv).b);
+            } else {
+              // The viewmodel flag, raw. Pure white or pure black by contract,
+              // so a capture of this view is a coverage mask that can be
+              // counted exactly rather than thresholded.
+              c = vec3(texture2D(tVelocity, vUv).a);
             }
             gl_FragColor = vec4(c, 1.0);
           }
@@ -368,6 +450,7 @@ export class ForwardPipeline implements RenderPipeline {
       'occlusion',
       'contact',
       'metalness',
+      'viewmodel',
     ];
     material.uniforms.tNormal!.value = this.gbuffer.normalRoughness;
     material.uniforms.tDepth!.value = this.gbuffer.depth;
@@ -455,7 +538,8 @@ export type DebugView =
   | 'velocity'
   | 'occlusion'
   | 'contact'
-  | 'metalness';
+  | 'metalness'
+  | 'viewmodel';
 
 /** Every `DebugView` except `off`, for validating a name from outside. */
 export const DEBUG_VIEWS: readonly DebugView[] = [
@@ -466,6 +550,7 @@ export const DEBUG_VIEWS: readonly DebugView[] = [
   'occlusion',
   'contact',
   'metalness',
+  'viewmodel',
 ];
 
 /** Shared full-screen triangle vertex shader. Reused by every post pass. */
