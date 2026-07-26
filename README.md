@@ -10,6 +10,37 @@ Built end to end by an AI agent fanning out to parallel subagents. See
 that shaped the plan, and an honest account of where the automated quality
 loop failed to catch things.
 
+## Screenshots
+
+Captured by the critic harness at 2560x1440 and downscaled for this page.
+Regenerate with `npm run capture`.
+
+![Establishing shot of the Shipyard arena](docs/screenshots/establishing.jpg)
+
+Backlit, with the building edge breaking the sun into glare and depth-masked
+light shafts:
+
+![Backlit shot with veiling glare and light shafts](docs/screenshots/backlit.jpg)
+
+Contact and cavity occlusion, resolved before shading and applied to indirect
+diffuse only rather than multiplied over the composited frame:
+
+![Close-up of crate, barrel and sandbag materials](docs/screenshots/material-detail.jpg)
+
+Interior sitting two to three stops below the sunlit yard, lit by its own
+practicals:
+
+![Warehouse interior in shadow](docs/screenshots/interior-shadow.jpg)
+
+Height fog and a lit cloud deck separating distance by contrast rather than by
+size alone:
+
+![Elevated rooftop view with aerial perspective](docs/screenshots/elevated.jpg)
+
+Aiming down the optic:
+
+![Aiming down sights](docs/screenshots/ads.jpg)
+
 ## Requirements
 
 - Node 22+
