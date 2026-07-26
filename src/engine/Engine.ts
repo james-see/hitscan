@@ -58,6 +58,7 @@ export class Engine {
   #lastTime = 0;
   #rafId = 0;
   #running = false;
+  #framePinned = false;
   #maxFrameTime: number;
   #perf: PerfHud;
   #ctx: EngineContext;
@@ -200,6 +201,24 @@ export class Engine {
     this.#advance(deltaSeconds);
   }
 
+  /**
+   * Stops the frame counter while continuing to render.
+   *
+   * A zero time scale freezes the simulation but not the frame index, and
+   * anything keyed to that index keeps cycling: the TAA jitter walks its
+   * eight-sample Halton period and the grain reseeds. The rendered image
+   * therefore depends on how many frames the browser happened to run before
+   * the screenshotter got its copy, which is not something the harness
+   * controls. Two capture runs of the same static shot could differ across
+   * three quarters of the frame purely from landing on different phases.
+   *
+   * Pinning the counter makes repeated frames idempotent, which is what lets
+   * the capture settle to a fixed point and photograph it reproducibly.
+   */
+  pinFrame(pinned: boolean): void {
+    this.#framePinned = pinned;
+  }
+
   #frame(now: number): void {
     const rawDelta = (now - this.#lastTime) / 1000;
     this.#lastTime = now;
@@ -217,7 +236,7 @@ export class Engine {
     const delta = Math.min(rawDelta, this.#maxFrameTime) * time.scale;
     time.delta = delta;
     time.elapsed += delta;
-    time.frame++;
+    if (!this.#framePinned) time.frame++;
 
     this.input.beginFrame();
 

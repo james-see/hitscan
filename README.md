@@ -149,7 +149,13 @@ makes screenshot captures reproducible.
 
 `tools/critic/` implements a verdict-gated review loop. `capture.mjs` boots the
 game in real Chrome on the GPU, drives it through `window.__hitscan`, and writes
-deterministic 2560x1440 PNGs from fixed camera presets. `rubric.mjs` defines
+2560x1440 PNGs from fixed camera presets. `determinism-check.mjs` measures how
+reproducible those PNGs actually are by capturing the same shot several times
+and comparing every pair; run it before trusting any result that comes from
+differencing two captures. It is worth reading the header of that file, because
+the harness claimed to be deterministic for most of this project's life and was
+not, which cost at least one confident and completely wrong conclusion.
+`rubric.mjs` defines
 twelve scored categories and a list of binary disqualifiers. `gate.mjs` applies
 the thresholds and exits non-zero while the work still falls short, which is what
 lets the improvement loop terminate on evidence rather than on opinion.

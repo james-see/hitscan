@@ -21,8 +21,20 @@ import { DebugViewPass, type DebugView } from './DebugViewPass.ts';
 /** Length of the Halton jitter cycle. */
 const JITTER_PERIOD = 8;
 
+/**
+ * Single-frame camera movement treated as a cut rather than locomotion.
+ *
+ * A sprinting player covers roughly 0.2m per frame, so there is two orders of
+ * magnitude between the fastest legitimate movement and this.
+ */
+const CAMERA_CUT_METRES = 5;
+
 interface PostDebugApi {
-  timings(): Record<string, { average: number; last: number; samples: number }>;
+  /** Per-pass GPU cost. Quote `floor`; see `PassProfiler.timings`. */
+  timings(): Record<
+    string,
+    { floor: number; median: number; last: number; samples: number; contention: number }
+  >;
   setProfiling(enabled: boolean): void;
   state(): {
     geometrySource: 'gbuffer' | 'post-fallback' | 'none';
@@ -42,9 +54,51 @@ interface PostDebugApi {
    * like the shaft falloff has no business being a user setting, but it still
    * has to be swept against a real frame to be chosen. This is that hook.
    */
-  tune(pass: 'shafts' | 'bloom' | 'grain', options: Record<string, number>): void;
+  tune(pass: 'shafts' | 'bloom' | 'grain' | 'taa' | 'ssr', options: Record<string, number>): void;
+  /**
+   * Drops every temporal accumulation to a known state.
+   *
+   * Drops the TAA history, restarts the jitter phase at the beginning of the
+   * Halton cycle, and snaps eye adaptation to the metered target. The jitter
+   * phase matters as much as the history: the accumulation weights recent
+   * frames most, so which phase arrived last changes the converged image, and
+   * the phase a run happens to be on when convergence starts is set by
+   * wall-clock timing.
+   *
+   * Call this immediately before `converge`, in the same synchronous block, so
+   * no free-running frame lands in between. On its own it is not enough to make
+   * a capture reproducible; see `freezeTemporal`.
+   */
+  resetTemporal(): void;
+  /**
+   * Stops both temporal accumulations, making the frame a true fixed point.
+   *
+   * Rendering more frames after this is a no-op, which is what lets a
+   * screenshot be taken at an unpredictable moment and still match. It is only
+   * reproducible at the end of a known sequence, so the capture path wants all
+   * three of these in one synchronous block:
+   *
+   *     __hitscanPost.resetTemporal();
+   *     __hitscan.converge(96);
+   *     __hitscanPost.freezeTemporal(true);
+   *
+   * A camera cut releases it, so a shot cannot silently photograph the
+   * previous one's frozen image.
+   */
+  freezeTemporal(enabled: boolean): void;
   /** Stalling readback of the adaptation loop's two state values. */
   exposure(): { exposure: number; averageLuminance: number } | null;
+  /**
+   * Fixed exposure used while auto-exposure is off.
+   *
+   * Comparing "auto-exposure on" against "auto-exposure off" is otherwise a
+   * comparison between two different image brightnesses, because the fallback
+   * is nowhere near the value the loop adapts to. On `interior-shadow` the
+   * shadows land 2.5 stops darker with it off, deep enough into the toe of the
+   * tone curve that every kind of noise is compressed -- which reads as the
+   * pass having been the noise source when it was the operating point.
+   */
+  setManualExposure(value: number): void;
 }
 
 declare global {
@@ -105,11 +159,18 @@ export class PostModule implements GameModule {
 
   #jitter = new THREE.Vector2();
   #jitterDelta = new THREE.Vector2();
+  /** Frame number treated as phase zero of the Halton cycle. */
+  #jitterOrigin = 0;
+  /** Set by `resetTemporal`, applied on the next frame. */
+  #jitterRebase = false;
   #appliedProjection = new THREE.Vector2();
   #appliedViewmodel = new THREE.Vector2();
   #jitterActive = false;
   #externalJitter = false;
   #frameContextJitter: THREE.Vector2 | null = null;
+
+  #previousCameraPosition = new THREE.Vector3();
+  #cameraTracked = false;
 
   #sunSource: SunSource | null | undefined;
   #sunDirection = new THREE.Vector3();
@@ -188,6 +249,7 @@ export class PostModule implements GameModule {
     this.#detectExternalJitter();
     this.#updateJitter(ctx);
     post.update(ctx.camera, this.#jitter);
+    this.#detectCameraCut(ctx);
 
     // Publish the offset the projection actually carries, so anything else
     // that needs it (a G-buffer velocity pass, say) can read the contract
@@ -201,8 +263,51 @@ export class PostModule implements GameModule {
     this.#geometry?.update(ctx.renderer, ctx, post);
     if (this.#debug.enabled) {
       this.#debug.shafts = this.#lightShafts.shaftTexture;
+      this.#debug.ssr = this.#ssr.reflectionTexture;
     }
     this.#profiler.poll();
+  }
+
+  /**
+   * Drops both temporal histories when the camera cuts instead of moving.
+   *
+   * A respawn, a spectator switch or the capture harness placing a shot leaves
+   * the exposure adapted to a view that no longer exists, and easing away from
+   * it spends the first second of the new view at the wrong brightness. It also
+   * made the flicker probe unreadable: with the harness converging 72 frames
+   * against a 0.9s adaptation constant, a quarter of the transient was still
+   * running when measurement began, and what the probe reported as flicker was
+   * a monotonic ramp.
+   *
+   * The threshold is far outside what locomotion can produce -- a sprinting
+   * player covers about 0.2m in a frame -- so this cannot fire while walking
+   * between the yard and the interior, which is the transition the slow
+   * asymmetric rates exist to serve.
+   */
+  #detectCameraCut(ctx: EngineContext): void {
+    const m = ctx.camera.matrixWorld.elements;
+    const x = m[12] as number;
+    const y = m[13] as number;
+    const z = m[14] as number;
+    const previous = this.#previousCameraPosition;
+    if (this.#cameraTracked) {
+      const dx = x - previous.x;
+      const dy = y - previous.y;
+      const dz = z - previous.z;
+      if (dx * dx + dy * dy + dz * dz > CAMERA_CUT_METRES * CAMERA_CUT_METRES) {
+        this.#autoExposure.reseed();
+        // Nothing on screen reprojects across a cut, so every pixel would be
+        // rejected on arrival anyway; dropping the history costs a frame of
+        // aliasing instead of a frame of the old view smeared over the new
+        // one. It also gives the accumulation a known starting state, which is
+        // what makes a converged capture reproducible.
+        this.#taa.reset();
+        this.#taa.frozen = false;
+        this.#autoExposure.frozen = false;
+      }
+    }
+    previous.set(x, y, z);
+    this.#cameraTracked = true;
   }
 
   /**
@@ -286,7 +391,21 @@ export class PostModule implements GameModule {
       return;
     }
 
-    const index = (ctx.time.frame % JITTER_PERIOD) + 1;
+    // Phase is an offset from the engine's frame counter rather than a counter
+    // of its own, so freezing that counter still freezes the sample position
+    // at a value the harness can predict. The offset exists so a temporal reset
+    // can restart the sequence at its beginning: the accumulation weights
+    // recent frames most, so which phase arrived last changes the converged
+    // image, and the phase a run happens to be on is set by wall-clock timing.
+    if (this.#jitterRebase) {
+      this.#jitterOrigin = ctx.time.frame;
+      this.#jitterRebase = false;
+    }
+    const phase = THREE.MathUtils.euclideanModulo(
+      ctx.time.frame - this.#jitterOrigin,
+      JITTER_PERIOD
+    );
+    const index = phase + 1;
     // Halton is in [0,1); centring it puts the sample cloud on the pixel.
     // The result is in NDC, which is two units across, hence the doubling.
     const x = ((halton(index, 2) - 0.5) * 2) / Math.max(this.#post.width, 1);
@@ -400,11 +519,31 @@ export class PostModule implements GameModule {
         this.#debug.view = view;
         this.#debug.enabled = view !== 'off';
         this.#debug.shafts = this.#lightShafts.shaftTexture;
+        this.#debug.ssr = this.#ssr.reflectionTexture;
+      },
+      resetTemporal: (): void => {
+        this.#taa.frozen = false;
+        this.#taa.reset();
+        this.#autoExposure.reseed();
+        this.#jitterRebase = true;
+      },
+      freezeTemporal: (enabled: boolean): void => {
+        this.#taa.frozen = enabled;
+        this.#autoExposure.frozen = enabled;
       },
       exposure: () => this.#autoExposure.readAdaptation(),
+      setManualExposure: (value: number): void => {
+        this.#post.exposureFallback = value;
+      },
       tune: (pass, options): void => {
-        const target =
-          pass === 'shafts' ? this.#lightShafts : pass === 'bloom' ? this.#bloom : this.#filmGrain;
+        const targets = {
+          shafts: this.#lightShafts,
+          bloom: this.#bloom,
+          grain: this.#filmGrain,
+          taa: this.#taa,
+          ssr: this.#ssr,
+        };
+        const target = targets[pass];
         for (const [key, value] of Object.entries(options)) {
           if (typeof (target as unknown as Record<string, unknown>)[key] === 'number') {
             (target as unknown as Record<string, number>)[key] = value;

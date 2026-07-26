@@ -369,6 +369,25 @@ export async function capture(options = {}) {
         })),
     ];
 
+    // A throwaway pass over the first shot. The first frames after boot differ
+    // from every later one by roughly 40% of pixels at mean 7 -- an order of
+    // magnitude above any other reproducibility term -- because texture
+    // streaming and shader compilation are still finishing. Paying for one
+    // discarded shot puts every kept shot on the warm side of that.
+    if (jobs.length > 0) {
+      step('warmup (discarded)');
+      await page.evaluate(async (id) => {
+        await window.__hitscan.setShot(id);
+        window.__hitscan.converge();
+        window.__hitscan.hold();
+      }, jobs[0].act ? jobs[0].act.base : jobs[0].preset.id);
+      await withTimeout(
+        cdp.send('Page.captureScreenshot', { format: 'png', fromSurface: true }),
+        30_000,
+        'warmup screenshot'
+      );
+    }
+
     for (const { preset, act } of jobs) {
       step(`shot ${preset.id}`);
       await page.evaluate(async (id) => {
@@ -384,6 +403,23 @@ export async function capture(options = {}) {
 
       // Extra convergence beyond setShot's own, for slow-settling effects.
       await page.evaluate((frames) => window.__hitscan.converge(frames), DEFAULTS.convergeFrames);
+
+      // Sampled before the settle below, which renders a burst of frames with
+      // the simulation frozen. Those are far cheaper than real ones and would
+      // otherwise be what the frame time reports.
+      const stats = await page.evaluate(() => window.__hitscan.stats());
+
+      // Then settle to a fixed point and pin it. Converging alone left the
+      // image free to keep changing during the round trip below, so which
+      // frame the compositor happened to hand back decided the pixels.
+      const held = await page.evaluate(() => window.__hitscan.hold());
+      if (!held.stable) {
+        process.stdout.write(
+          `    warning: ${preset.id} did not settle in ${held.frames} frames; ` +
+            `this capture is not reproducible\n`
+        );
+      }
+
       await page.waitForTimeout(120);
 
       // Two rAF ticks guarantee the compositor has presented the converged
@@ -406,7 +442,6 @@ export async function capture(options = {}) {
       );
       await writeFile(file, Buffer.from(data, 'base64'));
 
-      const stats = await page.evaluate(() => window.__hitscan.stats());
       results.push({ ...preset, file, stats });
       process.stdout.write(
         `  captured ${preset.id.padEnd(20)} ${stats.mean.toFixed(2)}ms  ` +

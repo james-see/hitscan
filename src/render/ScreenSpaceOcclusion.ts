@@ -100,7 +100,6 @@ export class ScreenSpaceOcclusion {
 
   #sunWorld = new THREE.Vector3(0, 1, 0);
   #sunView = new THREE.Vector3(0, 1, 0);
-  #frame = 0;
 
   /**
    * Shared by every patched material, so a single write here updates the
@@ -245,13 +244,22 @@ export class ScreenSpaceOcclusion {
    * before the forward pass, so the camera's projection already carries this
    * frame's TAA jitter and the buffer lines up with the shaded pixels exactly.
    */
-  render(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera): void {
+  /**
+   * @param frameIndex Drives the noise rotation. Supplied by the caller rather
+   *   than counted here so that freezing the engine's frame counter also
+   *   freezes this pattern. A private counter kept cycling through its 64
+   *   states on frames the simulation had frozen, which left the occlusion
+   *   churning under a still camera and made captures irreproducible.
+   */
+  render(
+    renderer: THREE.WebGLRenderer,
+    camera: THREE.PerspectiveCamera,
+    frameIndex: number
+  ): void {
     if (!this.#enabled) {
       this.#uniforms.hitscanOcclusionMap.value = this.#white;
       return;
     }
-
-    this.#frame = (this.#frame + 1) % 64;
     this.#sunView.copy(this.#sunWorld).transformDirection(camera.matrixWorldInverse).normalize();
 
     const trace = this.#trace;
@@ -275,7 +283,7 @@ export class ScreenSpaceOcclusion {
     trace.set('uContactLength', this.contactLength);
     trace.set('uContactThickness', this.contactThickness);
     trace.set('uContactFade', this.contactFade);
-    trace.set('uFrame', this.#frame);
+    trace.set('uFrame', ((frameIndex % 64) + 64) % 64);
 
     const previousTarget = renderer.getRenderTarget();
     trace.render(renderer, this.#target);

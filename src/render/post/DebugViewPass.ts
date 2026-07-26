@@ -5,7 +5,14 @@ import type { PostContext } from './PostContext.ts';
 import { BlitPass, FullscreenPass, GLSL_DEPTH, GLSL_MATH } from './common.ts';
 
 /** Buffers this pass can put on screen in place of the finished frame. */
-export type DebugView = 'off' | 'normal' | 'depth' | 'velocity' | 'shafts';
+export type DebugView =
+  | 'off'
+  | 'normal'
+  | 'depth'
+  | 'velocity'
+  | 'shafts'
+  | 'roughness'
+  | 'ssr';
 
 const VIEW_INDEX: Record<DebugView, number> = {
   off: 0,
@@ -13,6 +20,8 @@ const VIEW_INDEX: Record<DebugView, number> = {
   depth: 2,
   velocity: 3,
   shafts: 4,
+  roughness: 5,
+  ssr: 6,
 };
 
 /**
@@ -35,6 +44,8 @@ export class DebugViewPass implements RenderPass {
   view: DebugView = 'off';
   /** Bound by the module from whichever pass owns the buffer. */
   shafts: THREE.Texture | null = null;
+  /** SSR's traced reflection, premultiplied by confidence in alpha. */
+  ssr: THREE.Texture | null = null;
 
   #post: PostContext;
   #pass: FullscreenPass;
@@ -51,6 +62,7 @@ export class DebugViewPass implements RenderPass {
         tDepth: { value: null },
         tVelocity: { value: null },
         tShafts: { value: null },
+        tSsr: { value: null },
         uInvProjection: { value: new THREE.Matrix4() },
         uView: { value: 0 },
       },
@@ -61,6 +73,7 @@ export class DebugViewPass implements RenderPass {
         uniform sampler2D tDepth;
         uniform sampler2D tVelocity;
         uniform sampler2D tShafts;
+        uniform sampler2D tSsr;
         uniform mat4 uInvProjection;
         uniform int uView;
         varying vec2 vUv;
@@ -79,6 +92,17 @@ export class DebugViewPass implements RenderPass {
             result = vec3(saturate(abs(v) * 40.0), 0.0);
           } else if (uView == 4) {
             result = texture2D(tShafts, vUv).rgb;
+          } else if (uView == 5) {
+            // Raw roughness, so the value can be read off the image. Sky is
+            // flagged rather than left at zero, which would be indis-
+            // tinguishable from a mirror.
+            float depth = texture2D(tDepth, vUv).r;
+            vec4 n = texture2D(tNormal, vUv);
+            result = depth >= 1.0 ? vec3(0.0, 0.0, 1.0) : vec3(n.a);
+          } else if (uView == 6) {
+            // SSR confidence. Zero everywhere means the pass produced nothing,
+            // whatever it cost to find that out.
+            result = vec3(texture2D(tSsr, vUv).a);
           } else {
             result = texture2D(tDiffuse, vUv).rgb;
           }
@@ -105,6 +129,7 @@ export class DebugViewPass implements RenderPass {
     pass.set('tDepth', post.depth);
     pass.set('tVelocity', post.velocity);
     pass.set('tShafts', this.shafts);
+    pass.set('tSsr', this.ssr);
     (pass.uniforms.uInvProjection!.value as THREE.Matrix4).copy(post.jitteredProjectionInverse);
     pass.set('uView', VIEW_INDEX[this.view]);
     pass.render(renderer, output);

@@ -20,9 +20,11 @@ export interface ShotPreset {
 /**
  * The API the critic harness drives from Playwright.
  *
- * Exposed on `window.__hitscan`. Everything here is deterministic: the
- * harness steps frames manually rather than waiting on wall-clock time, so
- * two runs with the same seed produce byte-identical images.
+ * Exposed on `window.__hitscan`. The harness steps frames manually rather
+ * than waiting on wall-clock time, but that alone does not make a capture
+ * reproducible, because the browser keeps rendering between the last step
+ * and the screenshot. `hold` closes that gap; see `tools/critic/
+ * determinism-check.mjs`, which is the control that proves it.
  */
 export interface CaptureApi {
   /** Resolves once modules have initialised and assets are loaded. */
@@ -38,6 +40,13 @@ export interface CaptureApi {
    * sequence plus margin before a still frame stops changing.
    */
   converge(frames?: number): void;
+  /**
+   * Renders to a fixed point and pins it, so the frames the browser runs
+   * before the screenshot cannot change the image. Returns how long it took
+   * and whether it got there; an unstable result means the shot is still
+   * moving and any A/B against it is measuring the movement.
+   */
+  hold(maxFrames?: number): { frames: number; stable: boolean };
   /** Frame timing over the current sample window. */
   stats(): { mean: number; low1: number; max: number; calls: number; triangles: number };
   /**
@@ -66,6 +75,23 @@ export interface CaptureApi {
  * because the simulation is frozen while converging.
  */
 const CONVERGE_FRAMES = 72;
+
+/**
+ * Ceiling on the settle loop, about four seconds of frames.
+ *
+ * Reaching it means no fixed point was found, which is a result worth
+ * reporting rather than a budget worth raising.
+ */
+const HOLD_MAX_FRAMES = 240;
+
+/** Consecutive unchanged samples required before the image is called settled. */
+const HOLD_STABLE_RUNS = 3;
+
+/** Frames between stability samples; each readback stalls on the GPU. */
+const HOLD_SAMPLE_INTERVAL = 4;
+
+/** Frames to rebuild the temporal history after resetting it, before freezing. */
+const HOLD_RECONVERGE_FRAMES = 96;
 
 declare global {
   interface Window {
@@ -150,6 +176,7 @@ export class CaptureBridge {
       },
 
       step: (frames: number, deltaSeconds = 1 / 60): void => {
+        engine.pinFrame(false);
         const previousScale = engine.time.scale;
         engine.time.scale = 1;
         for (let i = 0; i < frames; i++) engine.stepManual(deltaSeconds);
@@ -157,6 +184,8 @@ export class CaptureBridge {
       },
 
       converge: (frames = CONVERGE_FRAMES): void => this.#converge(engine, frames),
+
+      hold: (maxFrames = HOLD_MAX_FRAMES) => this.#hold(engine, maxFrames),
 
       stats: () => {
         const s = engine.perf.stats();
@@ -168,8 +197,9 @@ export class CaptureBridge {
         };
       },
 
-      perform: (actions: InputAction[], frames: number, settleFrames = 0): void => {
-        const previousScale = engine.time.scale;
+        perform: (actions: InputAction[], frames: number, settleFrames = 0): void => {
+          engine.pinFrame(false);
+          const previousScale = engine.time.scale;
         engine.time.scale = 1;
         for (const a of actions) engine.input.injectPress(a);
         for (let i = 0; i < frames; i++) engine.stepManual(1 / 60);
@@ -211,10 +241,94 @@ export class CaptureBridge {
    * temporal accumulation buffers resolve.
    */
   #converge(engine: Engine, frames: number): void {
+    // Releasing the pin is what makes convergence work at all: TAA resolves by
+    // walking the jitter period, and a pinned counter would feed it the same
+    // sample every frame. A frozen accumulation would likewise never resolve.
+    engine.pinFrame(false);
+    window.__hitscanPost?.freezeTemporal?.(false);
     const previousScale = engine.time.scale;
     engine.time.scale = 0;
     for (let i = 0; i < frames; i++) engine.stepManual(1 / 60);
     engine.time.scale = previousScale;
+  }
+
+  /**
+   * Renders with the sample pattern pinned until the picture stops changing.
+   *
+   * Convergence and settling want opposite things from the frame counter, so
+   * they are separate steps. Convergence needs it moving to accumulate the
+   * jitter cloud; settling needs it still, because the point is to reach a
+   * state where rendering another frame is a no-op. Once there, it no longer
+   * matters how many frames Chrome runs before the screenshot lands.
+   *
+   * Stability is judged on a centre crop rather than the full frame: the
+   * quantities still in motion at this stage are global -- exposure
+   * adaptation and the residual TAA feedback -- so they show up anywhere,
+   * and reading fourteen megabytes per sample would cost more than the
+   * settling itself.
+   */
+  #hold(engine: Engine, maxFrames: number): { frames: number; stable: boolean } {
+    // Pin at a fixed phase, not at whichever one this run happens to be on.
+    // Frames keep running during the harness's round trips, so the counter's
+    // value here is set by wall-clock timing. Pinning it as found locks in an
+    // arbitrary jitter sample and then lets TAA converge onto it, which makes
+    // runs differ by more than leaving them alone did.
+    engine.time.frame = 0;
+    engine.pinFrame(true);
+
+    // Rebuild the temporal state from a known point, then stop it. Pinning the
+    // phase is not enough on its own: the TAA history is accumulated in half
+    // floats, so the blend never quite reaches a fixed point and the image
+    // keeps drifting by a fraction of a level indefinitely. Freezing the
+    // accumulation is what makes further frames genuinely a no-op.
+    const post = window.__hitscanPost;
+    if (post?.resetTemporal) {
+      post.freezeTemporal?.(false);
+      post.resetTemporal();
+      this.#converge(engine, HOLD_RECONVERGE_FRAMES);
+      engine.time.frame = 0;
+      engine.pinFrame(true);
+      post.freezeTemporal?.(true);
+    }
+    const previousScale = engine.time.scale;
+    engine.time.scale = 0;
+
+    const gl = engine.renderer.getContext();
+    const canvas = engine.renderer.domElement;
+    const width = Math.min(256, canvas.width);
+    const height = Math.min(256, canvas.height);
+    const x = Math.max(0, ((canvas.width - width) / 2) | 0);
+    const y = Math.max(0, ((canvas.height - height) / 2) | 0);
+
+    const current = new Uint8Array(width * height * 4);
+    let previous: Uint8Array | null = null;
+    let stableRuns = 0;
+    let frames = 0;
+
+    for (; frames < maxFrames; frames++) {
+      engine.stepManual(1 / 60);
+      if (frames % HOLD_SAMPLE_INTERVAL !== 0) continue;
+
+      gl.readPixels(x, y, width, height, gl.RGBA, gl.UNSIGNED_BYTE, current);
+      if (previous !== null) {
+        let identical = true;
+        for (let i = 0; i < current.length; i++) {
+          if (current[i] !== previous[i]) {
+            identical = false;
+            break;
+          }
+        }
+        stableRuns = identical ? stableRuns + 1 : 0;
+        if (stableRuns >= HOLD_STABLE_RUNS) break;
+      }
+      previous = current.slice();
+    }
+
+    engine.time.scale = previousScale;
+    // The pin deliberately outlives this call. Everything after it -- the
+    // screenshot round trip and whatever frames run during it -- has to see
+    // the same phase, and the next setShot or converge releases it.
+    return { frames, stable: stableRuns >= HOLD_STABLE_RUNS };
   }
 }
 

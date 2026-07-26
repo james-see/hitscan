@@ -232,7 +232,7 @@ export class ForwardPipeline implements RenderPipeline {
     // -- screen-space occlusion -----------------------------------------
     // Between the prepass and the forward pass: the G-buffer it reads is
     // complete, and the shading that consumes it has not started.
-    this.#occlusion?.render(renderer, camera);
+    this.#occlusion?.render(renderer, camera, frame.frame);
 
     // -- main scene -----------------------------------------------------
     renderer.setRenderTarget(this.#hdr);

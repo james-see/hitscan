@@ -5,6 +5,16 @@ import type { PostContext } from './PostContext.ts';
 import { BlitPass, FullscreenPass, GLSL_MATH, createColorTarget } from './common.ts';
 
 /**
+ * Frames after a cut during which exposure is read straight off the frame.
+ *
+ * Long enough for the temporal history to drain: TAA keeps about 90% of the
+ * previous frame, so after 32 frames the view the camera left contributes
+ * around 3% -- inside the adaptation deadband, so the value handed to the
+ * smoothing filter is one it can hold rather than one it has to crawl off.
+ */
+const SEED_FRAMES = 32;
+
+/**
  * Eye adaptation.
  *
  * The scene average is reduced on the GPU and the adapted value is left in a
@@ -40,22 +50,26 @@ export class AutoExposurePass implements RenderPass {
   /** Adaptation rate when the scene gets brighter. */
   speedUp = 3.4;
   /**
-   * Error below which the loop holds, in stops.
+   * Width of the band around the latched target, in stops.
    *
-   * At 0.02 stops the steady-state error is under 1.5%, which is invisible as
-   * a level but is the difference between a loop that settles and one that
-   * wanders. Must stay comfortably above the metering noise floor.
+   * Has to clear the metering noise floor, which is a few tenths of a percent
+   * of the average, or about 0.005 stops, and stay small enough that the
+   * exposure it settles on is not visibly wrong. 0.05 stops is 3.5% of
+   * exposure: an order of magnitude above the noise and a twentieth of a stop
+   * of standing error, which is not a level anyone can see.
    */
-  deadband = 0.02;
-  /**
-   * Error at which the asymmetric fast rate starts to apply, in stops.
-   *
-   * Below this the loop treats a discrepancy as measurement noise and uses
-   * one symmetric rate; above it, as a scene transition.
-   */
-  asymmetryStops = 0.35;
+  deadband = 0.05;
   minExposure = 0.08;
   maxExposure = 8;
+  /**
+   * Holds the adaptation at its current value. For the capture harness only.
+   *
+   * The deadband already stops the exposure moving on a static frame, so this
+   * is belt and braces rather than the fix for anything measured -- but the
+   * whole point of a frozen capture is that rendering another frame provably
+   * changes nothing, and a loop that is still running does not qualify.
+   */
+  frozen = false;
 
   #post: PostContext;
   #width = 1;
@@ -68,6 +82,7 @@ export class AutoExposurePass implements RenderPass {
   #adapted: [THREE.WebGLRenderTarget, THREE.WebGLRenderTarget] | null = null;
   #adaptedIndex = 0;
   #seeded = false;
+  #seedFrames = 0;
 
   #logLuminance: FullscreenPass;
   #reducePass: FullscreenPass;
@@ -96,30 +111,20 @@ export class AutoExposurePass implements RenderPass {
         }
 
         void main() {
-          // An exact box average of the 8x8 source block this texel covers.
+          // Four point samples of the 8x8 source block this texel covers.
           //
-          // This pass writes an eighth-resolution buffer, and it used to take
-          // four point samples at one source texel either side of the block
-          // centre: 4 of the block's 64 pixels, from a 3x3 corner of it. That
-          // is a sparse subsample of the frame, and because the projection
-          // carries a per-frame TAA jitter, the scene content slides under
-          // those fixed sample points every frame. On a high-contrast frame
-          // the subsample therefore disagrees with itself frame to frame even
-          // when nothing in the scene is moving, and the adaptation filter
-          // below integrates that disagreement into a slow visible wander.
-          //
-          // The source is bilinear, so a tap placed on a source texel
-          // boundary returns the mean of the four texels around it. Sixteen
-          // such taps at odd texel offsets tile the block exactly, counting
-          // every one of the 64 pixels once.
-          float sum = 0.0;
-          for (int y = 0; y < 4; y++) {
-            for (int x = 0; x < 4; x++) {
-              vec2 offset = (vec2(float(x), float(y)) * 2.0 - 3.0) * uTexelSize;
-              sum += logLuminance(texture2D(tSource, vUv + offset).rgb);
-            }
-          }
-          gl_FragColor = vec4(sum / 16.0, 0.0, 0.0, 1.0);
+          // A sparse subsample, but a uniform one, so it is an unbiased
+          // estimator of the frame mean and its variance is small. Replacing
+          // it with an exact 16-tap box average over the whole block was
+          // measured and made no difference to metering stability -- the
+          // per-frame variation is in the frame itself, not in which pixels
+          // are sampled -- so the cheaper version stands.
+          vec2 o = uTexelSize;
+          float l = logLuminance(texture2D(tSource, vUv + vec2(-o.x, -o.y)).rgb);
+          l += logLuminance(texture2D(tSource, vUv + vec2(o.x, -o.y)).rgb);
+          l += logLuminance(texture2D(tSource, vUv + vec2(-o.x, o.y)).rgb);
+          l += logLuminance(texture2D(tSource, vUv + vec2(o.x, o.y)).rgb);
+          gl_FragColor = vec4(l * 0.25, 0.0, 0.0, 1.0);
         }
       `,
     });
@@ -161,8 +166,7 @@ export class AutoExposurePass implements RenderPass {
         uMaxExposure: { value: 8 },
         uDeltaTime: { value: 1 / 60 },
         uSeeded: { value: 0 },
-        uDeadband: { value: 0.02 },
-        uAsymmetryStops: { value: 0.35 },
+        uDeadband: { value: 0.05 },
       },
       fragmentShader: /* glsl */ `
         precision highp float;
@@ -176,7 +180,6 @@ export class AutoExposurePass implements RenderPass {
         uniform float uDeltaTime;
         uniform float uSeeded;
         uniform float uDeadband;
-        uniform float uAsymmetryStops;
         varying vec2 vUv;
         ${GLSL_MATH}
 
@@ -185,51 +188,54 @@ export class AutoExposurePass implements RenderPass {
           float target = clamp(uKeyValue / max(averageLuminance, 1e-4), uMinExposure, uMaxExposure);
 
           if (uSeeded < 0.5) {
-            gl_FragColor = vec4(target, averageLuminance, 0.0, 1.0);
+            gl_FragColor = vec4(target, averageLuminance, target, 1.0);
             return;
           }
 
-          float previous = max(texture2D(tPrevious, vec2(0.5)).r, 1e-4);
+          vec4 state = texture2D(tPrevious, vec2(0.5));
+          float previous = max(state.r, 1e-4);
+          float reference = max(state.b, 1e-4);
 
-          // The loop runs in stops from here on. Exposure is multiplicative,
-          // so a threshold expressed as a difference in exposure would mean
-          // one thing in a lit yard and something quite different in a dark
-          // interior; expressed in stops it means the same thing everywhere.
-          float errorStops = log2(target / previous);
-          float magnitude = abs(errorStops);
-
-          // Deadband.
+          // Latched target, with a deadband in stops.
           //
-          // Metering is a measurement and carries noise, and an integrator
-          // with no dead zone turns noise of any amplitude into a random walk
-          // that never arrives. The pass needs a state in which it is
-          // genuinely converged and holds, not merely a slow one. The ramp is
-          // soft rather than a hard cut so a scene changing slowly enough to
-          // sit near the threshold is still tracked continuously, instead of
-          // in visible steps as the gate opens and shuts.
-          float gate = smoothstep(uDeadband, uDeadband * 3.0, magnitude);
-
-          // Asymmetry, reserved for real transitions.
+          // Metering measures a frame that is never identical twice: the
+          // occlusion estimator rotates its sample pattern every frame and the
+          // projection carries a sub-pixel jitter, so the metered average of a
+          // completely frozen scene still moves a few tenths of a percent.
+          // Feeding that to an integrator gives a loop with no fixed point,
+          // which is what players saw as the shadows breathing.
           //
-          // Adaptation toward bright genuinely is far faster than toward dark,
-          // and that is what makes stepping out of a corridor feel right. But
-          // selecting the rate on the sign of the error rectifies anything
-          // symmetric: noise in the fast direction is followed and noise in
-          // the slow direction is not, so the average is dragged instead of
-          // cancelling. Near convergence both directions therefore use the
-          // slow rate, and the fast one fades in only once the error is large
-          // enough to be a transition rather than a measurement.
-          float directional = errorStops < 0.0 ? uSpeedUp : uSpeedDown;
-          float speed = mix(
-            uSpeedDown,
-            directional,
-            smoothstep(uAsymmetryStops, uAsymmetryStops * 3.0, magnitude)
+          // So the loop chases a latched reference instead of the raw target,
+          // and the latch only moves once the target has left a band around it.
+          // Inside the band the reference is constant, the error decays to zero
+          // and the pass genuinely converges and holds.
+          //
+          // The band is on the target, not on the rate. That distinction is the
+          // whole fix: gating the rate leaves the reference point moving with
+          // the output, so one-sided noise excursions ratchet it along -- tried,
+          // and measured at twice the wander it was supposed to remove.
+          //
+          // Stops rather than a ratio, so the band means the same thing in a lit
+          // yard as in a dark interior.
+          float latch = step(uDeadband, abs(log2(target / reference)));
+          reference = mix(reference, target, latch);
+
+          // A brighter scene means a *smaller* exposure, so the fast rate is
+          // the one that applies when the target drops. Driven from the latched
+          // reference, so the asymmetry has no noise left to rectify.
+          float speed = reference < previous ? uSpeedUp : uSpeedDown;
+          // Exponential approach, framerate independent, and in stops so that a
+          // transition takes the same time whatever its endpoints. The latch
+          // moves in steps of the deadband during a slow scene change; this is
+          // what turns those steps back into a smooth ramp.
+          float blend = 1.0 - exp(-uDeltaTime * speed);
+          float adapted = previous * exp2(log2(reference / previous) * blend);
+          gl_FragColor = vec4(
+            clamp(adapted, uMinExposure, uMaxExposure),
+            averageLuminance,
+            reference,
+            1.0
           );
-
-          // Exponential approach, framerate independent, in stops.
-          float blend = (1.0 - exp(-uDeltaTime * speed)) * gate;
-          float adapted = previous * exp2(errorStops * blend);
-          gl_FragColor = vec4(clamp(adapted, uMinExposure, uMaxExposure), averageLuminance, 0.0, 1.0);
         }
       `,
     });
@@ -239,6 +245,27 @@ export class AutoExposurePass implements RenderPass {
       createColorTarget(1, 1, { type: THREE.FloatType, name: 'autoExposure.adapted1' }),
     ];
     this.#post.exposureTexture = this.#adapted[0].texture;
+  }
+
+  /**
+   * Discards the adaptation state, so exposure is read straight off the frame
+   * for the next few frames rather than eased toward.
+   *
+   * For a cut rather than a movement. Adaptation models the eye following a
+   * continuous change in what it is looking at; after a respawn or a camera
+   * teleport the previous exposure carries no information about the new view,
+   * and easing from it only means the first second of that view is wrong.
+   *
+   * It runs for a window rather than a single frame because the frame being
+   * metered is itself still converging: TAA is holding a history of the view
+   * the camera just left, so a one-frame snap exposes for a blend of the old
+   * view and the new one and then spends seconds crawling off that error.
+   * Snapping until the history has drained hands the smoothing filter a value
+   * it can hold instead.
+   */
+  reseed(): void {
+    this.#seedFrames = SEED_FRAMES;
+    this.#seeded = false;
   }
 
   /**
@@ -306,6 +333,12 @@ export class AutoExposurePass implements RenderPass {
     const luminance = this.#luminance as THREE.WebGLRenderTarget;
     const adapted = this.#adapted as [THREE.WebGLRenderTarget, THREE.WebGLRenderTarget];
 
+    if (this.frozen && this.#seeded) {
+      post.exposureTexture = adapted[this.#adaptedIndex].texture;
+      this.#blit.render(renderer, input, output);
+      return;
+    }
+
     this.#logLuminance.set('tSource', input);
     (this.#logLuminance.uniforms.uTexelSize!.value as THREE.Vector2).set(
       1 / this.#width,
@@ -335,7 +368,6 @@ export class AutoExposurePass implements RenderPass {
     adapt.set('uMinExposure', this.minExposure);
     adapt.set('uMaxExposure', this.maxExposure);
     adapt.set('uDeadband', this.deadband);
-    adapt.set('uAsymmetryStops', this.asymmetryStops);
     // Capture steps frames with a zero delta; without a floor the exposure
     // would never converge and every screenshot would be seeded, not adapted.
     adapt.set('uDeltaTime', Math.max(post.deltaTime, 1 / 240));
@@ -343,7 +375,8 @@ export class AutoExposurePass implements RenderPass {
     adapt.render(renderer, write);
 
     this.#adaptedIndex ^= 1;
-    this.#seeded = true;
+    if (this.#seedFrames > 0) this.#seedFrames -= 1;
+    this.#seeded = this.#seedFrames === 0;
     post.exposureTexture = write.texture;
 
     // The pass measures rather than transforms, but the chain still expects

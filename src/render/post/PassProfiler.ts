@@ -11,9 +11,14 @@ interface PendingQuery {
   query: WebGLQuery;
 }
 
+/** Recent samples kept per pass, for the percentile estimates. */
+const WINDOW = 64;
+
 interface PassStats {
-  /** Exponential moving average in milliseconds. */
-  average: number;
+  /** Ring of the most recent measurements, in milliseconds. */
+  recent: Float64Array;
+  cursor: number;
+  filled: number;
   last: number;
   samples: number;
 }
@@ -92,27 +97,67 @@ export class PassProfiler {
   }
 
   #record(name: string, milliseconds: number): void {
-    const existing = this.#stats.get(name);
-    if (existing === undefined) {
-      this.#stats.set(name, { average: milliseconds, last: milliseconds, samples: 1 });
-      return;
+    let stats = this.#stats.get(name);
+    if (stats === undefined) {
+      stats = {
+        recent: new Float64Array(WINDOW),
+        cursor: 0,
+        filled: 0,
+        last: 0,
+        samples: 0,
+      };
+      this.#stats.set(name, stats);
     }
-    existing.last = milliseconds;
-    existing.samples++;
-    existing.average += (milliseconds - existing.average) * 0.06;
+    stats.recent[stats.cursor] = milliseconds;
+    stats.cursor = (stats.cursor + 1) % WINDOW;
+    stats.filled = Math.min(stats.filled + 1, WINDOW);
+    stats.last = milliseconds;
+    stats.samples++;
+  }
+
+  #percentile(stats: PassStats, fraction: number): number {
+    const sorted = Array.from(stats.recent.subarray(0, stats.filled)).sort((a, b) => a - b);
+    if (sorted.length === 0) return 0;
+    const index = Math.min(sorted.length - 1, Math.floor(fraction * (sorted.length - 1)));
+    return sorted[index] as number;
   }
 
   reset(): void {
     this.#stats.clear();
   }
 
-  timings(): Record<string, { average: number; last: number; samples: number }> {
-    const out: Record<string, { average: number; last: number; samples: number }> = {};
+  /**
+   * Robust per-pass cost over the recent window.
+   *
+   * `floor` is the number to quote. A timer query measures a wall-clock GPU
+   * interval, and anything else contending for the GPU -- another browser, a
+   * compositor, a second capture session -- lands inside that interval and can
+   * only ever inflate it. So the low percentile is the honest estimate of what
+   * the pass itself costs, and the spread between `floor` and `median` says how
+   * contended the machine was while measuring.
+   *
+   * This replaced a mean, which is the wrong statistic here for the same
+   * reason: one 200ms sample off a contended GPU moved it by 12ms and took
+   * forty frames to decay, so a chain that cost 4ms could report 37ms and stay
+   * there.
+   */
+  timings(): Record<
+    string,
+    { floor: number; median: number; last: number; samples: number; contention: number }
+  > {
+    const out: Record<
+      string,
+      { floor: number; median: number; last: number; samples: number; contention: number }
+    > = {};
     for (const [name, stats] of this.#stats) {
+      const floor = this.#percentile(stats, 0.1);
+      const median = this.#percentile(stats, 0.5);
       out[name] = {
-        average: Number(stats.average.toFixed(3)),
+        floor: Number(floor.toFixed(3)),
+        median: Number(median.toFixed(3)),
         last: Number(stats.last.toFixed(3)),
         samples: stats.samples,
+        contention: Number((floor > 0 ? median / floor : 1).toFixed(2)),
       };
     }
     return out;

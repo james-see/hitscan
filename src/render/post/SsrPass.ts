@@ -38,6 +38,13 @@ export class SsrPass implements RenderPass {
   /** Depth tolerance when accepting a hit, in metres. */
   thickness = 0.4;
   intensity = 1.0;
+  /**
+   * Roughness above which the ray is not traced at all.
+   *
+   * Beyond this the lobe is so wide that a single mirror ray carries no
+   * information the environment probe does not already have.
+   */
+  maxRoughness = 0.85;
 
   #post: PostContext;
   #width = 1;
@@ -124,6 +131,7 @@ export class SsrPass implements RenderPass {
         uMaxLevel: { value: 6 },
         uMaxDistance: { value: 40 },
         uThickness: { value: 0.4 },
+        uMaxRoughness: { value: 0.85 },
         uFrame: { value: 0 },
       },
       fragmentShader: /* glsl */ `
@@ -139,6 +147,7 @@ export class SsrPass implements RenderPass {
         uniform float uMaxLevel;
         uniform float uMaxDistance;
         uniform float uThickness;
+        uniform float uMaxRoughness;
         uniform float uFrame;
         varying vec2 vUv;
         ${GLSL_MATH}
@@ -158,9 +167,7 @@ export class SsrPass implements RenderPass {
           }
 
           float roughness = clamp(normalSample.a, 0.02, 1.0);
-          // Beyond this the lobe is so wide that a single mirror ray carries
-          // no information the probe does not already have.
-          if (roughness > 0.85) {
+          if (roughness > uMaxRoughness) {
             gl_FragColor = vec4(0.0);
             return;
           }
@@ -419,6 +426,18 @@ export class SsrPass implements RenderPass {
     });
   }
 
+  /**
+   * The traced reflection before it is blurred or composited: colour
+   * premultiplied by confidence, confidence in alpha.
+   *
+   * Exposed so a debug view can answer whether the pass produced anything at
+   * all, which the final image cannot: a frame with no reflections and a frame
+   * where the composite discarded them are the same pixels.
+   */
+  get reflectionTexture(): THREE.Texture | null {
+    return this.#resolve?.texture ?? null;
+  }
+
   /** Maps `ssrQuality` onto the iteration budget. */
   setQuality(quality: number): void {
     const iterations = THREE.MathUtils.clamp(Math.round(quality * 2.4), 12, 96);
@@ -541,6 +560,7 @@ export class SsrPass implements RenderPass {
     trace.set('uMaxLevel', hiz.levels - 1);
     trace.set('uMaxDistance', this.maxDistance);
     trace.set('uThickness', this.thickness);
+    trace.set('uMaxRoughness', this.maxRoughness);
     trace.set('uFrame', post.frame % 64);
     trace.render(renderer, resolve);
 

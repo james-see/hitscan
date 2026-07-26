@@ -38,6 +38,29 @@ import {
  * where the "TAA is blurry" reputation comes from. Down-weighting the samples
  * that landed near the pixel edge turns the same accumulation into a Gaussian
  * fit for barely any extra work.
+ *
+ * One consequence is worth knowing before differencing two screenshots. On a
+ * completely static frame -- fixed camera, frozen simulation, jitter phase
+ * pinned, and a G-buffer verified bit-identical frame to frame -- this loop
+ * still never stops. Rounding the blend into the half-float history costs
+ * about 5e-4 relative per frame, and the accumulation amplifies it by 1/alpha:
+ * measured churn is proportional to 1/`feedbackStill` over an eight-fold
+ * sweep and falls to exactly zero pixels at alpha = 1, where the history is
+ * ignored. It amounts to a few hundredths of an 8-bit level, so it is
+ * invisible, but it flips about 5% of pixels by one level at any instant,
+ * which is the floor under any A/B of two captures.
+ *
+ * Snapping to the history inside a tolerance does not fix it and makes it
+ * about four times worse: the tolerance is a band the history may sit in, the
+ * blend widens that band by the same 1/alpha, and the variance clamp then
+ * hauls the pixel back across it, turning a sub-level jitter into a limit
+ * cycle two or three levels wide.
+ *
+ * Resetting to a known state is necessary but not sufficient, because the churn
+ * is where the loop lives rather than a memory of where it started: the frames
+ * that run between convergence and the screenshot keep wandering. A capture is
+ * reproducible only if the accumulation is also stopped, which is what `frozen`
+ * is for.
  */
 export class TaaPass implements RenderPass {
   readonly name = 'taa';
@@ -50,6 +73,17 @@ export class TaaPass implements RenderPass {
   feedbackMoving = 0.42;
   /** Neighbourhood AABB width, in standard deviations. */
   varianceGamma = 1.25;
+  /**
+   * Stops accumulating and republishes the history unchanged.
+   *
+   * For the capture harness only. It exists because the loop has no fixed
+   * point of its own (see above), so the only way a still frame can be
+   * photographed twice and match is to stop the accumulation once it has
+   * converged. Freezing is safe to do at any time, but it is only
+   * *reproducible* at the end of a known sequence: reset, converge a fixed
+   * number of frames, freeze.
+   */
+  frozen = false;
 
   #post: PostContext;
   #width = 1;
@@ -247,7 +281,7 @@ export class TaaPass implements RenderPass {
     this.#historyValid = false;
   }
 
-  /** Drops the accumulated history, for a camera cut. */
+  /** Drops the accumulated history, for a camera cut or a resize. */
   reset(): void {
     this.#historyValid = false;
   }
@@ -264,6 +298,11 @@ export class TaaPass implements RenderPass {
 
     const read = history[this.#historyIndex];
     const write = history[this.#historyIndex ^ 1];
+
+    if (this.frozen && this.#historyValid) {
+      this.#blit.render(renderer, read.texture, output);
+      return;
+    }
 
     this.#resolution.set(this.#width, this.#height);
     this.#texel.set(1 / this.#width, 1 / this.#height);
