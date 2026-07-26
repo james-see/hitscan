@@ -61,6 +61,14 @@ nothing.
 - **The arena was empty for the entire project.** `Number(null)` evaluates to
   `0` and passed the `?bots` override guard, so no bots ever spawned on a dev
   run. Every critic score before the fix judged a deserted map.
+- **Then the arena was still empty, for a second reason.** Nav voxelisation
+  covered the whole ground plane, which reaches ~20m past the perimeter walls.
+  That ring is flat and unobstructed, so it produced the most inviting walkable
+  cells in the level, and `#pickSpawn`'s preference for points far from the
+  player then selected it over the four authored spawns. All ten bots spawned
+  outside the map. The arena now publishes `playBounds` and nav clips to it;
+  as a side effect the grid holds its full 0.5m resolution instead of coarsening
+  to fit the terrain.
 - **Normal perturbation never executed.** Its anchor string sat inside an
   unresolved `#include` at `onBeforeCompile` time, and `String.replace` fails
   silently when it matches nothing. Every authored surface-detail value had

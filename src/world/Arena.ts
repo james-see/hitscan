@@ -44,6 +44,12 @@ export interface Arena {
   shots: ShotPreset[];
   /** Where the player starts, and where bots may spawn. */
   spawns: THREE.Vector3[];
+  /**
+   * The walled courtyard, which is the only space play happens in. The ground
+   * plane and the backdrop extend well past the walls and are walkable, so
+   * anything placing actors has to clip to this rather than to the terrain.
+   */
+  playBounds: THREE.Box3;
   /** Reported by the world module so the light budget stays visible. */
   localLightCount: number;
   dispose(): void;
@@ -146,6 +152,12 @@ export async function buildArena(ctx: EngineContext): Promise<Arena> {
     colliders,
     shots: SHOTS,
     spawns: SPAWNS.map((s) => s.clone()),
+    // Measured to the wall centrelines, then pulled in by half the wall
+    // thickness so the box is the clear span between them.
+    playBounds: new THREE.Box3(
+      new THREE.Vector3(-BOUND + 0.5, -1, -BOUND + 0.5),
+      new THREE.Vector3(BOUND - 0.5, WALL_HEIGHT + 6, BOUND - 0.5)
+    ),
     localLightCount: lights.length,
     dispose(): void {
       materials.dispose();

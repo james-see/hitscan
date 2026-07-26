@@ -165,6 +165,22 @@ export class AiModule implements GameModule {
     if (arena) bounds.setFromObject(arena, true);
     if (bounds.isEmpty()) bounds.setFromCenterAndSize(_spawn.set(0, 4, 0), _scratch.set(80, 12, 80));
 
+    // The scene bound covers the ground plane and the backdrop, which reach
+    // roughly 20m past the perimeter walls. That ring is flat and unobstructed,
+    // so voxelising it produces the most inviting walkable cells in the level
+    // and bots spawn and patrol out there, outside the map, where the player
+    // never goes. Clip to the courtyard the arena declares.
+    const world = ctx.getModule<GameModule & { playBounds?: THREE.Box3 | null }>('world');
+    const play = world?.playBounds;
+    if (play) {
+      bounds.min.x = Math.max(bounds.min.x, play.min.x);
+      bounds.min.z = Math.max(bounds.min.z, play.min.z);
+      bounds.max.x = Math.min(bounds.max.x, play.max.x);
+      bounds.max.z = Math.min(bounds.max.z, play.max.z);
+    } else {
+      console.warn('[ai] world published no playBounds; nav covers the full terrain');
+    }
+
     const centre = bounds.getCenter(new THREE.Vector3());
     const size = bounds.getSize(new THREE.Vector3());
     // A skybox or a stray far-away collider would otherwise balloon the grid.

@@ -18,6 +18,9 @@ export class WorldModule implements GameModule {
   /** Player and bot spawn points, published for whoever needs them. */
   spawns: THREE.Vector3[] = [];
 
+  /** The walled courtyard. Actors belong inside it; the terrain is larger. */
+  playBounds: THREE.Box3 | null = null;
+
   constructor(order = -50, bridge: CaptureBridge | null = null) {
     this.order = order;
     this.#bridge = bridge;
@@ -30,6 +33,7 @@ export class WorldModule implements GameModule {
     const arena = await buildArena(ctx);
     this.#root.add(arena.root);
     this.spawns = arena.spawns;
+    this.playBounds = arena.playBounds;
     this.#disposeArena = arena.dispose;
 
     for (const collider of arena.colliders) {
