@@ -9,9 +9,6 @@ dist/
 # Critic harness output.
 captures/
 
-# Reference images for blind comparison. Never committed: these are
-# third-party screenshots and are not ours to redistribute.
-refs/
-
-# Frozen tree served by the capture harness
+# Frozen tree served by the capture harness, one per concurrent run
 .capture-snapshot/
+.capture-snapshot-*/

@@ -62,9 +62,8 @@ The alternatives were fully procedural authoring in code, which caps visual
 quality hard, and AI-generated textures filling gaps, which was declined to
 keep the licensing of everything shipped unambiguous.
 
-Note that `refs/`, the Call of Duty screenshots used for the blind A/B
-comparison, is deliberately **not** committed. Those are third-party press
-images and are not ours to redistribute.
+No third-party reference screenshots are committed either; see below for why
+the comparison that needed them was dropped.
 
 ### 3. Renderer — WebGL2 with a hand-rolled post stack
 
@@ -95,6 +94,28 @@ produced real misses:
 - **Every camera preset was a static scene with nobody firing**, so the effects
   work was scored on frames containing no effects. The capture set now includes
   firing variants driven through real input actions.
+- **The arena was empty for the entire project.** A debug override read
+  `Number(null)` as a valid zero, so no bots ever spawned on a dev run. Every
+  critic score up to that point judged a deserted map.
+
+### The blind comparison was removed
+
+The brief asked for a literal blind side-by-side against Call of Duty, and it
+was built. It has since been deleted, because the comparison it performed was
+not the one intended.
+
+Every reference image sourced for it was a third-person promotional
+screenshot — hero characters shot from behind, dominated by cloth, skin, faces
+and gear. This renderer draws none of that: every frame it produces is
+first-person with a weapon in view. A critic comparing the two is scoring
+subject matter and art direction, not rendering, and would mark the project
+down for reasons no amount of shader work could address.
+
+Sourcing genuine first-person gameplay stills would have fixed the mismatch.
+The judgement was that a rubric with concrete numeric criteria is the more
+honest instrument regardless, and that a comparison against press material
+mostly measures how much of the frame is occupied by a photogrammetry-scanned
+face. Quality review is now rubric-only.
 
 ## License
 

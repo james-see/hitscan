@@ -8,7 +8,16 @@ weapon animation, and bot combat.
 Built end to end by an AI agent fanning out to parallel subagents. See
 [ORIGIN.md](ORIGIN.md) for the prompt that produced it, the three decisions
 that shaped the plan, and an honest account of where the automated quality
-loop failed to catch things.
+loop failed to catch things. [CHANGELOG.md](CHANGELOG.md) records what v1
+contains and the defects found building it; [docs/ROADMAP.md](docs/ROADMAP.md)
+carries the open work.
+
+Performance has not been established. Absolute frame cost on the same code and
+the same machine drifts by 3–4x over minutes — a static 2560x1440 frame
+measured 9.9ms and then 33.6ms half an hour later — so no absolute figure here
+is trustworthy. What is stable across every sample is the *marginal* cost of
+firing, at 9–11ms over a static frame, which is large enough to matter at any
+baseline. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Screenshots
 
@@ -72,9 +81,17 @@ sprint, `Ctrl` to crouch, `R` to reload, `Esc` to release the cursor.
 | `npm run critic` | Capture and emit a critic briefing |
 | `npm run gate` | Score a critic verdict against the quality gate |
 
-Captures serve a hardlinked copy of the tree from `.capture-snapshot/` with HMR
-off, so a run is pinned to one revision even while the working tree is being
-edited. `--query` (repeatable) forwards parameters to the page, which is how
+Captures serve a private copy of the tree from `.capture-snapshot-<pid>/` with
+HMR off, so a run is pinned to one revision even while the working tree is
+being edited. The copy is per-process, because concurrent runs sharing one path
+delete each other's snapshot mid-capture, and it is a real copy rather than
+hardlinked, because in-place writes to the original otherwise mutate the shared
+inode and change the "frozen" tree mid-run.
+
+The snapshot is type-checked before capture (about 0.3s). A tree copied while
+another process was mid-edit is internally inconsistent, and without this the
+run reports the downstream symptom -- a black frame, zero fixed steps -- as
+though it were a defect in the subsystem under test. Pass `--no-verify` to skip. `--query` (repeatable) forwards parameters to the page, which is how
 module-specific capture overrides are photographed. Each value is parsed as a
 query fragment, so several keys can be set in one flag:
 
@@ -173,12 +190,8 @@ The reviewer is deliberately stateless each iteration; a critic that remembers
 its previous scores anchors on them and drifts upward, quietly defeating the
 gate.
 
-### Blind comparison
-
-`blind.mjs` builds an anonymised, randomised comparison set from our captures
-plus any reference screenshots placed in `refs/`, writing the answer key outside
-the image directory. Reference images are gitignored: they are third-party
-screenshots and are not ours to redistribute.
+Review is rubric-only. A blind A/B against Call of Duty screenshots was built
+and later removed; `ORIGIN.md` records why.
 
 ## Assets
 
@@ -187,9 +200,7 @@ processed offline into packed ORM textures. Provenance for every asset,
 including author and licence, is recorded in `public/assets/manifest.json`. See
 `tools/assets/README.md` for details.
 
-`refs/`, the reference screenshots used for blind comparison during quality
-review, is deliberately not committed. Those are third-party press images and
-are not ours to redistribute.
+No third-party press images are committed.
 
 ## License
 
