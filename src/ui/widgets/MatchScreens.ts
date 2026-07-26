@@ -1,4 +1,10 @@
-import { formatClock, type MatchEndReason, type MatchSnapshot, type ScoreRow } from '@/match/rules.ts';
+import {
+  formatClock,
+  ROUND_LENGTHS,
+  type MatchEndReason,
+  type MatchSnapshot,
+  type ScoreRow,
+} from '@/match/rules.ts';
 import { el, text } from '../dom.ts';
 import { ScoreTableView } from './ScoreTableView.ts';
 
@@ -6,6 +12,8 @@ export interface MatchScreenHandlers {
   onDeploy(): void;
   onPlayAgain(): void;
   onLobby(): void;
+  /** Round length chosen in the lobby, in seconds. */
+  onSetRoundLength(seconds: number): void;
 }
 
 const REASON_TEXT: Record<MatchEndReason, string> = {
@@ -20,8 +28,15 @@ const OUTCOME_TEXT = {
   draw: 'DRAW',
 } as const;
 
-const CONTROLS =
-  'WASD move · Shift sprint · Ctrl crouch · R reload · Tab scoreboard · Esc pause';
+/**
+ * Split across two lines because the first one is the answer to "how do I
+ * play". Fire and aim were both missing here, which left right-click to aim
+ * undiscoverable: nothing else in the game names a control.
+ */
+const CONTROLS = [
+  'Left click fire · Right click aim · R reload · WASD move',
+  'Shift sprint · Ctrl crouch · Space jump · I inspect · Tab scoreboard · Esc pause',
+];
 
 /**
  * The two screens that bracket a round: the lobby and the results.
@@ -47,6 +62,8 @@ export class MatchScreens {
   #table: ScoreTableView;
   #primary: HTMLButtonElement;
   #mode: HTMLElement;
+  #lengthOptions: HTMLButtonElement[] = [];
+  #timeValue: HTMLElement | null = null;
   #open = false;
   #onKeyDown: (event: KeyboardEvent) => void;
 
@@ -59,11 +76,26 @@ export class MatchScreens {
     text('div', 'mscreen-title', 'HITSCAN', this.#pregame);
     this.#mode = text('div', 'mscreen-mode', '', this.#pregame);
     this.#rules = el('div', 'mscreen-rules', this.#pregame);
+    const lengthRow = el('div', 'mscreen-choice', this.#pregame);
+    text('span', 'label mscreen-choice-label', 'ROUND', lengthRow);
+    for (const seconds of ROUND_LENGTHS) {
+      const option = el('button', 'btn mscreen-choice-option', lengthRow);
+      option.type = 'button';
+      option.textContent = formatClock(seconds);
+      option.dataset.seconds = String(seconds);
+      option.addEventListener('click', () => {
+        handlers.onSetRoundLength(seconds);
+        this.#selectLength(seconds);
+      });
+      this.#lengthOptions.push(option);
+    }
+
     const deploy = el('button', 'btn btn--primary mscreen-cta', this.#pregame);
     deploy.type = 'button';
     deploy.textContent = 'DEPLOY';
     deploy.addEventListener('click', handlers.onDeploy);
-    text('div', 'mscreen-hint', CONTROLS, this.#pregame);
+    const hint = el('div', 'mscreen-hint', this.#pregame);
+    for (const line of CONTROLS) text('div', '', line, hint);
 
     // -- results -------------------------------------------------------------
     this.#results = el('div', 'mscreen-panel mscreen-panel--results', this.root);
@@ -102,8 +134,9 @@ export class MatchScreens {
     this.#mode.textContent = snapshot.mode;
     this.#rules.replaceChildren();
     this.#addRule('SCORE LIMIT', String(snapshot.scoreLimit));
-    this.#addRule('TIME LIMIT', formatClock(snapshot.timeLimitSeconds));
+    this.#timeValue = this.#addRule('TIME LIMIT', formatClock(snapshot.timeLimitSeconds));
     this.#addRule('HOSTILES', String(rosterSize));
+    this.#selectLength(snapshot.timeLimitSeconds);
     this.#primary = this.#pregame.querySelector('.mscreen-cta') as HTMLButtonElement;
     this.#setOpen('pregame');
   }
@@ -139,9 +172,23 @@ export class MatchScreens {
     this.root.classList.add('is-open');
   }
 
-  #addRule(label: string, value: string): void {
+  #addRule(label: string, value: string): HTMLElement {
     const row = el('div', 'mscreen-rule', this.#rules);
     text('span', 'label', label, row);
-    text('span', 'mscreen-rule-value', value, row);
+    return text('span', 'mscreen-rule-value', value, row);
+  }
+
+  /**
+   * Reflects a length choice straight away. The lobby is only re-rendered on a
+   * phase change, and choosing a length is not one, so the click has to update
+   * the panel itself or it appears to do nothing.
+   */
+  #selectLength(seconds: number): void {
+    for (const option of this.#lengthOptions) {
+      const selected = Number(option.dataset.seconds) === seconds;
+      option.classList.toggle('is-selected', selected);
+      option.setAttribute('aria-pressed', String(selected));
+    }
+    if (this.#timeValue) this.#timeValue.textContent = formatClock(seconds);
   }
 }

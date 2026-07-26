@@ -234,6 +234,15 @@ export class MatchModule implements GameModule {
     });
   }
 
+  /**
+   * Chooses the round length from the lobby. Ignored once a round is live,
+   * because the clock is already counting against the old limit.
+   */
+  setRoundLength(seconds: number): void {
+    if (this.#phase !== 'pregame' || !Number.isFinite(seconds) || seconds <= 0) return;
+    this.#rules.timeLimitSeconds = seconds;
+  }
+
   /** Abandons a live round and returns to the lobby. */
   returnToLobby(): void {
     if (this.#phase === 'idle') return;

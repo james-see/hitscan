@@ -27,6 +27,7 @@ interface MatchLike {
   rows(): ScoreRow[];
   requestStart(): void;
   returnToLobby(): void;
+  setRoundLength(seconds: number): void;
 }
 
 /** Height at which the 8px grid is exactly 8 physical pixels. */
@@ -115,6 +116,7 @@ export class UiModule implements GameModule {
         onDeploy: () => this.#deploy(ctx),
         onPlayAgain: () => this.#deploy(ctx),
         onLobby: () => this.#match?.returnToLobby(),
+        onSetRoundLength: (seconds) => this.#match?.setRoundLength(seconds),
       });
     }
 

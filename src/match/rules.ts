@@ -26,10 +26,17 @@ export interface MatchRules {
   respawnSeconds: number;
 }
 
+/**
+ * Round lengths offered in the lobby. Five minutes is the default because ten
+ * is a long sitting for a single free-for-all and the score limit rarely
+ * arrives first; the longer options are there for a full run at the limit.
+ */
+export const ROUND_LENGTHS: readonly number[] = [180, 300, 600, 900];
+
 export const DEFAULT_RULES: MatchRules = {
   mode: 'FREE-FOR-ALL',
   scoreLimit: 30,
-  timeLimitSeconds: 600,
+  timeLimitSeconds: 300,
   // Long enough for the death camera to land and be read, short enough that
   // it does not feel like a penalty on top of the death itself.
   respawnSeconds: 4,

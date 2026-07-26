@@ -1769,6 +1769,28 @@
   font-variant-numeric: tabular-nums;
 }
 
+#hud .mscreen-choice {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.75);
+  margin-bottom: calc(var(--u) * 3);
+}
+#hud .mscreen-choice-label {
+  margin-right: calc(var(--u) * 0.75);
+  color: var(--ink-3);
+}
+#hud .mscreen-choice-option {
+  padding: calc(var(--u) * 0.875) calc(var(--u) * 1.75);
+  letter-spacing: 0.12em;
+  text-indent: 0.12em;
+  font-variant-numeric: tabular-nums;
+}
+#hud .mscreen-choice-option.is-selected {
+  color: var(--accent);
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
 #hud .mscreen-cta {
   padding: calc(var(--u) * 1.75) calc(var(--u) * 6);
   font-size: var(--fs-sm);
@@ -1779,6 +1801,7 @@
   letter-spacing: 0.08em;
   color: var(--ink-3);
   text-align: center;
+  line-height: 1.9;
 }
 
 #hud .mscreen-outcome {
