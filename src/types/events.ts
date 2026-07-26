@@ -49,7 +49,34 @@ export interface GameEvents {
   'combat:player-damaged': { amount: number; from: THREE.Vector3; health: number };
   'combat:player-healed': { amount: number; health: number };
 
+  // -- match ----------------------------------------------------------------
+  /**
+   * Match lifecycle. The match module owns this state; everything else reacts.
+   *
+   * `match:started` is what turns a sandbox into a round: before it, bots
+   * exist but nothing is being counted, and the player is free to move around
+   * the arena. Modules that gate behaviour on a live round should listen for
+   * this rather than assuming combat begins at boot.
+   */
+  'match:started': { mode: string; scoreLimit: number; timeLimitSeconds: number };
+  'match:score-changed': { playerScore: number; opponentScore: number };
+  /** Once per second while a round is live, for the HUD clock. */
+  'match:tick': { remainingSeconds: number };
+  'match:ended': {
+    outcome: 'victory' | 'defeat' | 'draw';
+    playerScore: number;
+    opponentScore: number;
+    reason: 'score-limit' | 'time-limit' | 'forfeit';
+  };
+
   // -- player ---------------------------------------------------------------
+  /**
+   * The player has been killed. Distinct from `combat:actor-died`, which
+   * covers bots: the player's death drives the camera, input lockout and the
+   * respawn countdown, none of which apply to an AI actor.
+   */
+  'player:died': { killerId: string | null; headshot: boolean };
+  'player:respawned': { position: THREE.Vector3 };
   'player:landed': { velocity: number; surface: SurfaceKind };
   'player:jumped': void;
   'player:slide-started': void;
