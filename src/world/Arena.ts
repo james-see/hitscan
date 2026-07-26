@@ -21,10 +21,12 @@ import {
   palletGeometry,
   pillar,
   pipeRun,
+  pipeStack,
   pitchedRoof,
   railing,
   sandbagGeometry,
   sandbagWall,
+  servicePanel,
   shelfRack,
   shippingContainer,
   slabField,
@@ -169,7 +171,11 @@ function defineProps(props: PropLibrary): void {
   props.define('plank', chamferBox(1, 0.05, 0.19, 0.01), 'wood');
   props.define('cobble', chamferBox(1, 0.1, 1, 0.02), 'trim');
   props.define('foliage', foliageGeometry(), 'wood', { mode: 'world' }, false);
-  props.define('railPost', standing(chamferBox(0.07, 1.06, 0.07, 0.014)), 'metal');
+  // Two guardrail posts off one geometry: galvanised is the default and the
+  // rusted variant is there for the derelict runs. `PropLibrary.build` skips
+  // definitions nothing was placed into, so the unused one costs nothing.
+  props.define('railPost', standing(chamferBox(0.07, 1.06, 0.07, 0.014)), 'steel');
+  props.define('railPostRust', standing(chamferBox(0.07, 1.06, 0.07, 0.014)), 'metal');
   props.define('bollard', chamferBox(0.26, 0.9, 0.26, 0.05), 'trim');
   props.define('lampLens', new THREE.SphereGeometry(1, 8, 6), 'emissive', { mode: 'world' }, false);
 }
@@ -703,7 +709,9 @@ function buildYardGate(
       w: width / 2 - 0.06,
       h: height,
       d: 0.14,
-      material: 'metal',
+      // Sheeted leaf under yard enamel; the frame and brace welded over it are
+      // bare, because the weld line is ground back and never gets recoated.
+      material: 'paint',
       tint: PALETTE.steelGreen,
       grime: 0.4,
       mottle: 0.05,
@@ -720,7 +728,7 @@ function buildYardGate(
         w: width / 2 - 0.06,
         h: 0.14,
         d: 0.08,
-        material: 'metal',
+        material: 'steel',
         tint: PALETTE.steel,
         collide: false,
         chamfer: 0.02,
@@ -734,7 +742,7 @@ function buildYardGate(
       h: 0.11,
       d: 0.07,
       tiltZ: Math.atan2(height, width / 2) * side,
-      material: 'metal',
+      material: 'steel',
       tint: PALETTE.steel,
       collide: false,
       chamfer: 0.02,
@@ -891,6 +899,13 @@ function buildWarehouse(
   }
 
   // Roller shutter, mostly raised: drum, guide rails and a hanging curtain.
+  //
+  // The `interior-shadow` camera stands 5.5 m out and looks straight at this,
+  // so it is where the kit's split between bare and painted steel is most
+  // legible. Drum housing and guide channels are galvanised — they are rolled
+  // sections bought by the metre and never painted — and the curtain is coated
+  // lath, a dielectric film, so it reads as colour and a soft sheen while the
+  // channels either side of it mirror the yard.
   b.box({
     x,
     y: bayHead + 0.28,
@@ -898,7 +913,7 @@ function buildWarehouse(
     w: bayWidth + 0.5,
     h: 0.42,
     d: 0.42,
-    material: 'metal',
+    material: 'steel',
     tint: PALETTE.steel,
     collide: false,
     chamfer: 0.06,
@@ -910,7 +925,7 @@ function buildWarehouse(
     w: bayWidth,
     h: 0.62,
     d: 0.09,
-    material: 'metal',
+    material: 'paint',
     tint: PALETTE.steelGreen,
     grime: 0.15,
     collide: false,
@@ -925,7 +940,7 @@ function buildWarehouse(
       w: 0.14,
       h: bayHead + 0.3,
       d: 0.2,
-      material: 'metal',
+      material: 'steel',
       tint: PALETTE.steel,
       grime: 0.35,
       collide: false,
@@ -1011,7 +1026,8 @@ function buildWarehouse(
     }
   }
 
-  // Services running along the inside of the east wall.
+  // Services running along the inside of the east wall: a rusted process line
+  // overhead and a bare riser dropping off it.
   pipeRun(b, {
     from: new THREE.Vector3(east - 0.32, height - 0.9, north + 0.5),
     to: new THREE.Vector3(east - 0.32, height - 0.9, south - 0.5),
@@ -1022,8 +1038,44 @@ function buildWarehouse(
     from: new THREE.Vector3(east - 0.32, 0, north + 1.2),
     to: new THREE.Vector3(east - 0.32, height - 1.0, north + 1.2),
     radius: 0.07,
-    tint: PALETTE.steel,
+    material: 'steel',
     bracketEvery: 1.8,
+  });
+
+  // Distribution board on the outside of the pier between the bay and the
+  // personnel door, with its conduit running down to the slab. The
+  // `interior-shadow` camera looks straight at this wall from 5.5 m.
+  servicePanel(b, {
+    cx: x - 3.55,
+    cy: 1.62,
+    cz: south + t / 2,
+    rotY: 0,
+    width: 0.66,
+    height: 0.88,
+    drop: 1.15,
+  });
+  // A second, smaller one by the workbench, facing across the interior.
+  servicePanel(b, {
+    cx: east - 0.32,
+    cy: 1.55,
+    cz: z - 4.4,
+    rotY: -Math.PI / 2,
+    width: 0.44,
+    height: 0.56,
+    drop: 0.85,
+  });
+
+  // Bar stock racked against the north wall. Bare steel, and the one thing in
+  // the interior bright enough to give the shadow pocket a highlight.
+  pipeStack(b, {
+    cx: x - 3.1,
+    cz: north + 1.0,
+    y: 0.07,
+    rotY: Math.PI / 2,
+    length: 3.2,
+    radius: 0.08,
+    base: 4,
+    rows: 3,
   });
 
   // Two practicals: a hanging work lamp deep inside, and a spill lamp over the
@@ -2025,7 +2077,10 @@ function buildGantry(
         new THREE.Vector3(x + side * 0.78, y, z - 0.22),
         new THREE.Vector3(x + side * 0.78, y, z + 0.22),
         0.022,
-        PALETTE.steel
+        PALETTE.steel,
+        // Rungs are galvanised bar. They are also the only part of the leg a
+        // person touches, so they stay bright while the lattice behind rusts.
+        'steel'
       );
     }
   }
@@ -2039,7 +2094,10 @@ function buildGantry(
     tint: PALETTE.steelRust,
   });
 
-  // Runway rails and a walkway plate on top of the girder.
+  // Runway rails and a walkway plate on top of the girder. The rails are the
+  // one part of a crane that cannot rust: the trolley wheels polish them back
+  // to bare steel every time it travels, which is why they are the brightest
+  // line on the whole structure from any angle.
   for (const rz of [z - 0.75, z + 0.75]) {
     b.box({
       x: 0,
@@ -2048,7 +2106,7 @@ function buildGantry(
       w: legX * 2 + 3.6,
       h: 0.1,
       d: 0.16,
-      material: 'metal',
+      material: 'steel',
       tint: PALETTE.steel,
       grime: 0.05,
       chamfer: 0.02,
@@ -2079,7 +2137,9 @@ function buildGantry(
     w: 1.7,
     h: 1.0,
     d: 1.5,
-    material: 'metal',
+    // Machinery enamel over the trolley frame: a dielectric film, so it takes
+    // a sky highlight and nothing else.
+    material: 'paint',
     tint: PALETTE.steelRed,
     grime: 0.25,
     chamfer: 0.05,
@@ -2099,7 +2159,7 @@ function buildGantry(
     w: 0.5,
     h: 0.62,
     d: 0.34,
-    material: 'metal',
+    material: 'paint',
     tint: PALETTE.steelRed,
     grime: 0.2,
     chamfer: 0.04,
@@ -2129,7 +2189,7 @@ function buildGantry(
     h: 2.3,
     d: 1.5,
     rotY: 0.12,
-    material: 'metal',
+    material: 'paint',
     tint: PALETTE.steelGreen,
     grime: 0.35,
     chamfer: 0.05,
@@ -2142,7 +2202,7 @@ function buildGantry(
     h: 0.12,
     d: 1.7,
     rotY: 0.12,
-    material: 'metal',
+    material: 'steel',
     tint: PALETTE.steel,
     chamfer: 0.03,
     collide: false,
@@ -3733,6 +3793,20 @@ function dressCourtyard(b: WorldBuilder, props: PropLibrary, rng: Rng): void {
     [-6.1, 12.9],
   ]);
   sandbagWall(b, props, heroRng, { cx: -3.0, cz: 11.4, rotY: 0.22, length: 3.4, rows: 5 });
+  // Bar stock on bearers behind the crates. This shot is the arena's closest
+  // read of material response and every surface in it was a dielectric: rough
+  // timber, hessian, concrete and rusted drum. The stack puts one genuinely
+  // reflective object in the frame to measure the rest against.
+  pipeStack(b, {
+    cx: -8.3,
+    cz: 13.9,
+    y: 0.02,
+    rotY: 1.18,
+    length: 2.8,
+    radius: 0.085,
+    base: 4,
+    rows: 3,
+  });
   b.box({
     x: -4.6,
     y: 0,
@@ -3812,7 +3886,7 @@ function dressCourtyard(b: WorldBuilder, props: PropLibrary, rng: Rng): void {
     from: new THREE.Vector3(BOUND - 0.66, 4.0, -22),
     to: new THREE.Vector3(BOUND - 0.66, 4.0, 6),
     radius: 0.09,
-    tint: PALETTE.steel,
+    material: 'steel',
     bracketEvery: 3.4,
   });
   pipeRun(b, {

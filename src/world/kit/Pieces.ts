@@ -602,8 +602,10 @@ export function stairRun(b: WorldBuilder, o: StairOptions): void {
         d: 0.07,
         rotY,
         tiltZ: slope,
-        material: 'metal',
-        tint: PALETTE.steelRust,
+        // Galvanised, to match the deck guardrail it runs up to. A handrail
+        // that changes material halfway up a flight reads as an error.
+        material: 'steel',
+        tint: PALETTE.steel,
         collide: false,
         chamfer: 0.02,
       });
@@ -620,8 +622,8 @@ export function stairRun(b: WorldBuilder, o: StairOptions): void {
           h: 1.0 + (u + run / 2) * Math.tan(slope) - stepIndex * rise,
           d: 0.06,
           rotY,
-          material: 'metal',
-          tint: PALETTE.steelRust,
+          material: 'steel',
+          tint: PALETTE.steel,
           collide: false,
           chamfer: 0.015,
         });
@@ -639,11 +641,18 @@ export interface RailingOptions {
   height?: number;
   tint?: THREE.Color;
   postSpacing?: number;
+  material?: MaterialKey;
 }
 
 /**
  * A steel guardrail. Posts are instanced; rails are merged into the static
  * batch because a single long box is cheaper than many short ones.
+ *
+ * Galvanised by default. Handrail is the one thing in a working yard that is
+ * reliably not rusty — it is the part people touch, it is replaced when it
+ * stops being safe, and hot-dip galvanising is what it is replaced with. It
+ * is also the arena's best reflector: a metre-high run of bare tube at eye
+ * level along the platform edge, catching the sky the whole way down.
  */
 export function railing(
   b: WorldBuilder,
@@ -657,7 +666,8 @@ export function railing(
     length,
     rotY = 0,
     height = 1.06,
-    tint = PALETTE.steelRust,
+    material = 'steel',
+    tint = material === 'steel' ? PALETTE.steel : PALETTE.steelRust,
     postSpacing = 1.5,
   } = o;
 
@@ -669,7 +679,7 @@ export function railing(
     const u = -length / 2 + (length * i) / count;
     const [px, pz] = localPoint(cx, cz, rotY, u, 0);
     matrix.compose(new THREE.Vector3(px, y, pz), quaternion, scale);
-    props.place('railPost', matrix, tint);
+    props.place(material === 'steel' ? 'railPost' : 'railPostRust', matrix, tint);
   }
 
   for (const railY of [height - 0.05, height * 0.55]) {
@@ -681,14 +691,16 @@ export function railing(
       h: 0.07,
       d: 0.05,
       rotY,
-      material: 'metal',
+      material,
       tint,
       collide: false,
       chamfer: 0.018,
       uv: { mode: 'world', rotate: true },
     });
   }
-  // Toe board, and the single collider that keeps the player on the deck.
+  // Toe board, and the single collider that keeps the player on the deck. The
+  // toe board is the part boots and pallet corners hit, so it keeps its dirt
+  // gradient even on the galvanised variant.
   b.box({
     x: cx,
     y: y + 0.02,
@@ -697,7 +709,7 @@ export function railing(
     h: 0.16,
     d: 0.05,
     rotY,
-    material: 'metal',
+    material,
     tint,
     grime: 0.3,
     collide: false,
@@ -720,11 +732,21 @@ export interface PipeRunOptions {
   /** Bracket spacing in metres. 0 disables them. */
   bracketEvery?: number;
   collide?: boolean;
+  /** Pipe and flange material. Brackets are always bare steel. */
+  material?: MaterialKey;
 }
 
 /** A pipe with flange joints and wall brackets. */
 export function pipeRun(b: WorldBuilder, o: PipeRunOptions): void {
-  const { from, to, radius = 0.09, tint = PALETTE.steelRust, bracketEvery = 2.4, collide = false } = o;
+  const {
+    from,
+    to,
+    radius = 0.09,
+    material = 'metal',
+    tint = material === 'steel' ? PALETTE.steel : PALETTE.steelRust,
+    bracketEvery = 2.4,
+    collide = false,
+  } = o;
   const delta = new THREE.Vector3().subVectors(to, from);
   const length = delta.length();
   if (length < 0.05) return;
@@ -738,7 +760,7 @@ export function pipeRun(b: WorldBuilder, o: PipeRunOptions): void {
   const geometry = new THREE.CylinderGeometry(radius, radius, length, 12, 1, false);
   const matrix = new THREE.Matrix4().compose(centre, quaternion, ONE);
   b.add(geometry, matrix, {
-    material: 'metal',
+    material,
     tint,
     grime: 0.25,
     uv: { mode: 'local', repeat: [(2 * Math.PI * radius) / 2.5, length / 2.5] },
@@ -750,7 +772,7 @@ export function pipeRun(b: WorldBuilder, o: PipeRunOptions): void {
     const t = i / (joints + 1);
     const p = new THREE.Vector3().lerpVectors(from, to, t);
     b.add(flange, new THREE.Matrix4().compose(p, quaternion, ONE), {
-      material: 'metal',
+      material,
       tint,
       uv: { mode: 'local', repeat: [(2 * Math.PI * radius * 1.35) / 2.5, 0.05] },
     });
@@ -768,7 +790,9 @@ export function pipeRun(b: WorldBuilder, o: PipeRunOptions): void {
         w: up ? radius * 3.4 : 0.06,
         h: radius * 3.6,
         d: up ? 0.06 : radius * 3.4,
-        material: 'metal',
+        // Brackets are folded strip, replaced far more often than the pipe
+        // they hold, so they stay bare regardless of what is running through.
+        material: 'steel',
         tint: PALETTE.steel,
         collide: false,
         chamfer: 0.012,
@@ -927,6 +951,16 @@ export interface ContainerOptions {
 /**
  * A shipping container: ribbed flanks, corner castings, a raised roof lip and
  * a door end with locking bars. Eight of these were plain boxes before.
+ *
+ * Three materials, one per honest reading of the real object. The flanks and
+ * the door leaves are Corten under a marine enamel, so they are a dielectric
+ * film and take `paint`: glossy, coloured, and reflecting nothing but a sky
+ * highlight. The rails and corner castings are cast and forged steel that is
+ * never painted for long — they are what the crane spreader and every other
+ * container corner grinds against — so they take `steel` and are the part of
+ * the stack that actually mirrors the yard. The locking bars keep the rusted
+ * material, because a bar that lives outdoors and is handled twice a year is
+ * the one component here that really is oxide.
  */
 export function shippingContainer(b: WorldBuilder, o: ContainerOptions): void {
   const { x, y = 0, z, rotY = 0, length = 6.06, tint = PALETTE.steelBlue } = o;
@@ -942,7 +976,7 @@ export function shippingContainer(b: WorldBuilder, o: ContainerOptions): void {
     h: height,
     d: width,
     rotY,
-    material: 'metal',
+    material: 'paint',
     tint,
     grime: 0.34,
     mottle: 0.05,
@@ -966,7 +1000,7 @@ export function shippingContainer(b: WorldBuilder, o: ContainerOptions): void {
         h: height - 0.34,
         d: 0.035,
         rotY,
-        material: 'metal',
+        material: 'paint',
         tint,
         grime: 0.22,
         collide: false,
@@ -987,7 +1021,7 @@ export function shippingContainer(b: WorldBuilder, o: ContainerOptions): void {
         h: 0.16,
         d: 0.1,
         rotY,
-        material: 'metal',
+        material: 'steel',
         tint: PALETTE.steel,
         grime: railY < 0.5 ? 0.4 : 0.1,
         collide: false,
@@ -1007,7 +1041,7 @@ export function shippingContainer(b: WorldBuilder, o: ContainerOptions): void {
           h: 0.26,
           d: 0.24,
           rotY,
-          material: 'metal',
+          material: 'steel',
           tint: PALETTE.steel,
           grime: 0.3,
           collide: false,
@@ -1045,7 +1079,7 @@ export function shippingContainer(b: WorldBuilder, o: ContainerOptions): void {
     h: height - 0.42,
     d: width - 0.14,
     rotY,
-    material: 'metal',
+    material: 'paint',
     tint: tint.clone().multiplyScalar(0.92),
     grime: 0.3,
     collide: false,
@@ -1154,6 +1188,7 @@ export interface LatticeOptions {
   tint?: THREE.Color;
   /** Number of diagonal web panels. */
   panels?: number;
+  material?: MaterialKey;
 }
 
 /**
@@ -1164,7 +1199,15 @@ export interface LatticeOptions {
  * merges into the metal batch.
  */
 export function latticeGirder(b: WorldBuilder, o: LatticeOptions): void {
-  const { from, to, size, chordRadius = 0.075, tint = PALETTE.steelRust, panels = 8 } = o;
+  const {
+    from,
+    to,
+    size,
+    chordRadius = 0.075,
+    material = 'metal',
+    tint = material === 'steel' ? PALETTE.steel : PALETTE.steelRust,
+    panels = 8,
+  } = o;
   const axis = new THREE.Vector3().subVectors(to, from);
   const length = axis.length();
   const direction = axis.clone().normalize();
@@ -1195,7 +1238,7 @@ export function latticeGirder(b: WorldBuilder, o: LatticeOptions): void {
       new THREE.CylinderGeometry(radius, radius, len, 8, 1, false),
       new THREE.Matrix4().compose(centre, quaternion, ONE),
       {
-        material: 'metal',
+        material,
         tint,
         grime: 0.16,
         uv: { mode: 'local', repeat: [(2 * Math.PI * radius) / 2.5, len / 2.5] },
@@ -1290,6 +1333,234 @@ export function slabField(
       });
     }
   }
+}
+
+export interface ServicePanelOptions {
+  /** Centre of the cabinet face, on the wall plane. */
+  cx: number;
+  cy: number;
+  cz: number;
+  /** Facing direction of the cabinet, as a yaw. */
+  rotY?: number;
+  width?: number;
+  height?: number;
+  /** How far conduit drops from the cabinet toward the floor. 0 disables. */
+  drop?: number;
+  tint?: THREE.Color;
+}
+
+/**
+ * A wall-mounted switchgear cabinet with conduit drops.
+ *
+ * Every building in a working yard has one of these and this arena had none.
+ * It is also the most useful reflector the kit can offer an interior: a flat
+ * upright half-metre of galvanised sheet at chest height, which is exactly the
+ * geometry a screen-space trace can resolve — near the camera, facing it, and
+ * with the lit doorway behind the viewer to reflect.
+ */
+export function servicePanel(b: WorldBuilder, o: ServicePanelOptions): void {
+  const {
+    cx,
+    cy,
+    cz,
+    rotY = 0,
+    width = 0.62,
+    height = 0.82,
+    drop = 0,
+    tint = PALETTE.steel,
+  } = o;
+  const depth = 0.19;
+  const standoff = 0.06;
+  // `t` runs out of the wall, so the cabinet faces +t: yaw 0 faces +z.
+  const at = (u: number, t = 0): [number, number] => localPoint(cx, cz, rotY, u, t);
+
+  // Backing spacers, so the cabinet stands off the wall the way a real one does
+  // and casts a slot of shadow behind itself.
+  for (const side of [-1, 1]) {
+    const [sx, sz] = at(side * (width / 2 - 0.06), standoff / 2);
+    b.box({
+      x: sx,
+      y: cy - height / 2,
+      z: sz,
+      w: 0.05,
+      h: height,
+      d: standoff,
+      rotY,
+      material: 'steel',
+      tint: PALETTE.steelDark,
+      collide: false,
+      chamfer: 0.008,
+    });
+  }
+
+  const [bx, bz] = at(0, standoff + depth / 2);
+  b.box({
+    x: bx,
+    y: cy - height / 2,
+    z: bz,
+    w: width,
+    h: height,
+    d: depth,
+    rotY,
+    material: 'steel',
+    tint,
+    grime: 0.18,
+    grimeTop: cy - height / 2 + 0.3,
+    collide: false,
+    chamfer: 0.02,
+    // Across the ribs rather than along them: a cabinet door is pressed sheet
+    // with a shallow stiffening fold, not corrugate.
+    uv: { mode: 'world', rotate: true, scale: 2.4 },
+  });
+
+  // Door lip and the quarter-turn latch.
+  const [lx, lz] = at(0, standoff + depth + 0.005);
+  b.box({
+    x: lx,
+    y: cy - height / 2 + 0.05,
+    z: lz,
+    w: width - 0.09,
+    h: height - 0.1,
+    d: 0.02,
+    rotY,
+    material: 'steel',
+    tint: tint.clone().multiplyScalar(1.04),
+    collide: false,
+    chamfer: 0.008,
+    uv: { mode: 'world', rotate: true, scale: 2.4 },
+  });
+  const [hx, hz] = at(width / 2 - 0.09, standoff + depth + 0.03);
+  b.box({
+    x: hx,
+    y: cy - 0.04,
+    z: hz,
+    w: 0.05,
+    h: 0.08,
+    d: 0.04,
+    rotY,
+    material: 'steel',
+    tint: PALETTE.steelDark,
+    collide: false,
+    chamfer: 0.01,
+  });
+
+  if (drop > 0) {
+    for (const u of [-width / 2 + 0.12, width / 2 - 0.12]) {
+      const [px, pz] = at(u, standoff * 0.7);
+      b.add(
+        new THREE.CylinderGeometry(0.022, 0.022, drop, 8, 1, false),
+        new THREE.Matrix4().compose(
+          new THREE.Vector3(px, cy - height / 2 - drop / 2, pz),
+          new THREE.Quaternion().setFromEuler(new THREE.Euler(0, rotY, 0)),
+          ONE
+        ),
+        {
+          material: 'steel',
+          tint,
+          grime: 0.3,
+          uv: { mode: 'local', repeat: [0.06, drop / 2.5] },
+        }
+      );
+    }
+  }
+}
+
+export interface PipeStackOptions {
+  cx: number;
+  cz: number;
+  /** Ground height the timber bearers sit on. */
+  y: number;
+  rotY?: number;
+  length?: number;
+  radius?: number;
+  /** Tubes in the bottom row. Each row above holds one fewer. */
+  base?: number;
+  rows?: number;
+  tint?: THREE.Color;
+}
+
+/**
+ * Bar stock racked in a pyramid on timber bearers.
+ *
+ * Stock steel is stored bare because a coating would have to come off again
+ * before it is used, so this is one of the few things in a yard that is
+ * honestly near mirror-finish. A pyramid of tube also gives the reflection
+ * curvature to bend, which reads far more convincingly as metal than the same
+ * area of flat sheet would.
+ */
+export function pipeStack(b: WorldBuilder, o: PipeStackOptions): void {
+  const {
+    cx,
+    cz,
+    y,
+    rotY = 0,
+    length = 2.6,
+    radius = 0.085,
+    base = 4,
+    rows = 3,
+    tint = PALETTE.steel,
+  } = o;
+
+  const bearerH = 0.11;
+  for (const u of [-length / 2 + 0.34, length / 2 - 0.34]) {
+    const [px, pz] = localPoint(cx, cz, rotY, u, 0);
+    b.box({
+      x: px,
+      y,
+      z: pz,
+      w: 0.13,
+      h: bearerH,
+      d: radius * 2 * base + 0.24,
+      rotY,
+      material: 'wood',
+      tint: PALETTE.woodGrey,
+      grime: 0.5,
+      collide: false,
+      chamfer: 0.012,
+    });
+  }
+
+  const axis = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, rotY, 0));
+  const along = new THREE.Quaternion().setFromUnitVectors(
+    new THREE.Vector3(0, 1, 0),
+    new THREE.Vector3(1, 0, 0)
+  );
+  const orientation = axis.clone().multiply(along);
+  const geometry = new THREE.CylinderGeometry(radius, radius, length, 14, 1, false);
+  // Each row nests into the valley of the one below, which is 2r*sin(60°) up.
+  const rise = radius * 2 * 0.866;
+
+  for (let row = 0; row < rows; row++) {
+    const count = base - row;
+    if (count < 1) break;
+    for (let i = 0; i < count; i++) {
+      const t = (i - (count - 1) / 2) * radius * 2;
+      const [px, pz] = localPoint(cx, cz, rotY, 0, t);
+      b.add(
+        geometry,
+        new THREE.Matrix4().compose(
+          new THREE.Vector3(px, y + bearerH + radius + row * rise, pz),
+          orientation,
+          ONE
+        ),
+        {
+          material: 'steel',
+          tint,
+          // Only the bottom row sees the ground, and stock does not sit long
+          // enough to streak, so this is much lighter than the kit default.
+          grime: row === 0 ? 0.22 : 0.06,
+          uv: { mode: 'local', repeat: [(2 * Math.PI * radius) / 2.5, length / 2.5] },
+        }
+      );
+    }
+  }
+
+  b.solid(
+    new THREE.Vector3(cx, y + (bearerH + radius * 2 + rows * rise) / 2, cz),
+    new THREE.Vector3(length / 2, (bearerH + radius * 2 + rows * rise) / 2, (radius * base) / 1.1),
+    'metal',
+    axis
+  );
 }
 
 /** A single tubular member between two points. Used for bracing and cables. */

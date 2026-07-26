@@ -4,13 +4,28 @@ import type { SurfaceKind } from '@/types/gameplay.ts';
 import { disposeDetailTextures } from './Detail.ts';
 import { decorateSurface, type SurfaceProfile } from './Surfaces.ts';
 
-export type MaterialKey = 'ground' | 'plaster' | 'trim' | 'metal' | 'wood' | 'burlap';
+/**
+ * `metal`, `steel` and `paint` are all the same corrugated-iron scan and differ
+ * only in how they treat its metalness channel. See `RESPONSE` for why there
+ * are three of them.
+ */
+export type MaterialKey =
+  | 'ground'
+  | 'plaster'
+  | 'trim'
+  | 'metal'
+  | 'steel'
+  | 'paint'
+  | 'wood'
+  | 'burlap';
 
 const MATERIAL_IDS: Record<MaterialKey, string> = {
   ground: 'concrete_ground',
   plaster: 'plaster_wall',
   trim: 'concrete_trim',
   metal: 'rusted_metal',
+  steel: 'rusted_metal',
+  paint: 'rusted_metal',
   wood: 'wood_planks',
   // Hessian has no scan of its own in the set; the fine aggregate of the
   // concrete wall reads as coarse cloth once the weave normal is over it and
@@ -23,6 +38,8 @@ const SURFACES: Record<MaterialKey, SurfaceKind> = {
   plaster: 'concrete',
   trim: 'concrete',
   metal: 'metal',
+  steel: 'metal',
+  paint: 'metal',
   wood: 'wood',
   burlap: 'sand',
 };
@@ -32,17 +49,77 @@ const TILE_OVERRIDE: Partial<Record<MaterialKey, number>> = {
   burlap: 0.85,
 };
 
-/** Per-material response overrides, on top of what the ORM texture carries. */
-const RESPONSE: Record<MaterialKey, { roughness: number; metalness: number; normal: number }> = {
+const colour = (r: number, g: number, b: number): THREE.Color => new THREE.Color(r, g, b);
+
+interface MaterialResponse {
+  /** Multiplies the ORM green channel. */
+  roughness: number;
+  /** Multiplies the ORM blue channel unless `mapMetalness` is false. */
+  metalness: number;
+  normal: number;
+  /**
+   * Ignores the ORM blue channel, making `metalness` above the whole story.
+   * The scan's own metalness is a property of the surface it was taken from,
+   * so it can only be honoured by a material that claims to be that surface.
+   */
+  mapMetalness?: boolean;
+  /**
+   * Replaces the albedo map with a flat colour. For a conductor the albedo is
+   * the specular F0 rather than a diffuse tint, and a real steel F0 is close
+   * to uniform: what varies over a sheet of it is gloss and relief, not
+   * reflectance. Painting the scan's tonal variation into F0 instead reads as
+   * a metal that cannot decide what it is made of.
+   */
+  albedo?: THREE.Color;
+  envMapIntensity?: number;
+}
+
+/**
+ * Per-material response overrides, on top of what the ORM texture carries.
+ *
+ * THE THREE IRON MATERIALS. All three are the same Poly Haven corrugated-iron
+ * scan, and the only thing separating them is metalness — which is the whole
+ * point, because metalness is not a dial for how shiny something should look.
+ *
+ *  - `metal` is the scan as authored: weathered rust, whose ORM blue channel
+ *    sits at 0.25 because rust is an oxide and oxides are dielectrics. That
+ *    value is correct and is deliberately left alone. Raising it would buy
+ *    reflections by lying about what the surface is.
+ *  - `steel` is bare or lightly worn steel, which is a conductor: metalness 1
+ *    with the scan's rust metalness discarded, and a flat F0 in place of the
+ *    scan's albedo. This is the only material in the kit that reflects the
+ *    yard, and it exists because a working shipyard is full of clean steel —
+ *    guardrail, shutter guides, conduit, switchgear — none of which had any
+ *    representation here.
+ *  - `paint` is painted steel, which is a dielectric film over a conductor and
+ *    reads as the film: metalness 0, and glossier than bare rust because
+ *    industrial enamel is. Its 0 is as deliberate as steel's 1 — a painted
+ *    container flank that reflects like metal is the same error in reverse.
+ */
+const RESPONSE: Record<MaterialKey, MaterialResponse> = {
   ground: { roughness: 1.0, metalness: 0.0, normal: 1.1 },
   plaster: { roughness: 0.98, metalness: 0.0, normal: 1.35 },
   trim: { roughness: 0.92, metalness: 0.0, normal: 1.0 },
-  metal: { roughness: 0.85, metalness: 1.0, normal: 0.95 },
+  metal: { roughness: 0.85, metalness: 1.0, normal: 0.95, envMapIntensity: 1.15 },
+  // 0.58 against a green channel averaging 0.62 lands the sheet around 0.36
+  // with the weathered patches reaching 0.5 — worn galvanising, not chrome.
+  steel: {
+    roughness: 0.58,
+    metalness: 1.0,
+    normal: 0.8,
+    mapMetalness: false,
+    albedo: colour(0.56, 0.57, 0.58),
+  },
+  paint: {
+    roughness: 0.62,
+    metalness: 0.0,
+    normal: 0.95,
+    mapMetalness: false,
+    envMapIntensity: 1.0,
+  },
   wood: { roughness: 0.95, metalness: 0.0, normal: 1.25 },
   burlap: { roughness: 1.0, metalness: 0.0, normal: 0.45 },
 };
-
-const colour = (r: number, g: number, b: number): THREE.Color => new THREE.Color(r, g, b);
 
 /**
  * Detail-layer settings per material.
@@ -148,6 +225,56 @@ const PROFILES: Record<MaterialKey, SurfaceProfile> = {
     dust: 0.04,
     roughness: 0.1,
   },
+  // Clean steel is deliberately the least weathered profile in the kit. It
+  // still takes junction dirt and a little run-off, because nothing in a yard
+  // stays spotless and a flawless handrail reads as a placeholder — but the
+  // stain and cavity terms that give rust its blotching are nearly off, since
+  // on a conductor they darken F0 rather than a diffuse tint, and a mottled
+  // F0 is what makes cheap metal look like painted plastic.
+  //
+  // The roughness swing is the widest here for the opposite reason: a
+  // reflective surface is read almost entirely through the sharpness of what
+  // it reflects, so half a stop of gloss variation across a sheet does more
+  // work on steel than any amount of albedo detail would.
+  steel: {
+    macroScale: 2.0,
+    microScale: 0,
+    normalMacro: 0,
+    normalMicro: 0,
+    aggregate: 0,
+    patch: 0,
+    stain: 0.08,
+    stainColor: colour(0.86, 0.85, 0.83),
+    cavity: 0,
+    cavityOcclusion: 0,
+    grime: 0.24,
+    grimeHeight: 0.6,
+    grimeColor: colour(0.58, 0.56, 0.52),
+    streak: 0.16,
+    dust: 0.03,
+    roughness: 0.2,
+  },
+  // Painted steel weathers on the surface of the paint rather than through it,
+  // so this sits between rust and bare: visible run-off and junction dirt, but
+  // no pitting, and a narrow gloss swing because enamel wears evenly.
+  paint: {
+    macroScale: 2.4,
+    microScale: 0,
+    normalMacro: 0,
+    normalMicro: 0,
+    aggregate: 0,
+    patch: 0,
+    stain: 0.18,
+    stainColor: colour(0.78, 0.74, 0.68),
+    cavity: 0,
+    cavityOcclusion: 0,
+    grime: 0.32,
+    grimeHeight: 0.7,
+    grimeColor: colour(0.54, 0.5, 0.44),
+    streak: 0.22,
+    dust: 0.04,
+    roughness: 0.1,
+  },
   // Wood takes the junction dirt and nothing else: it is the surface the critic
   // measured at 60.7 and held up as the standard, so the only job here is to
   // stop crates looking as though they were set down clean.
@@ -226,10 +353,17 @@ export function buildMaterials(resources: ResourceManager): KitMaterials {
     const response = RESPONSE[key];
     material.roughness = response.roughness;
     material.metalness = response.metalness;
+    if (response.mapMetalness === false) material.metalnessMap = null;
+    if (response.albedo) {
+      material.map = null;
+      material.color.copy(response.albedo);
+    }
     if (material.normalMap) material.normalScale.set(response.normal, response.normal);
     // The tinting below already darkens; a slight sheen keeps plaster from
-    // going completely matte under the sky dome.
-    material.envMapIntensity = key === 'metal' ? 1.15 : 0.85;
+    // going completely matte under the sky dome. The conductors get the
+    // physical 1.0: on a surface whose whole appearance is its reflection,
+    // scaling the environment is scaling the thing itself.
+    material.envMapIntensity = response.envMapIntensity ?? (response.metalness > 0 ? 1.0 : 0.85);
     decorateSurface(material, PROFILES[key]);
     byKey[key] = material;
 

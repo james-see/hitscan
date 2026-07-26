@@ -154,6 +154,86 @@ export function configureSurfaces(context: Partial<SurfaceContext>): void {
 let cacheKeySeed = 0;
 
 /**
+ * One anchored injection into a shader string, loud when the anchor is gone.
+ *
+ * `String.prototype.replace` returns the subject unchanged when the pattern is
+ * absent, so a patch whose anchor has moved compiles a shader that is missing
+ * a feature and reports nothing. That is not a hypothetical: the normal
+ * perturbation below anchored on a line that lives inside a chunk *body*, and
+ * `shader.fragmentShader` at `onBeforeCompile` time still holds the unresolved
+ * `#include` — three's `resolveIncludes` does not run until `WebGLProgram`. The
+ * perturbation therefore never once executed, and every surface in the arena
+ * shipped without the relief its profile asks for.
+ *
+ * A patch that cannot find its anchor is always a bug, so this throws. Two
+ * matches is the same bug wearing a different hat: it means the anchor stopped
+ * identifying one site and we would be guessing which one to take.
+ */
+function injectShader(source: string, anchor: string, replacement: string, where: string): string {
+  const at = source.indexOf(anchor);
+  if (at < 0) {
+    throw new Error(
+      `[world/Surfaces] shader anchor missing in ${where}: ${JSON.stringify(anchor)}. ` +
+        'The surface layer cannot be applied. If three was upgraded, this anchor ' +
+        'has moved or been renamed and the injection needs re-siting.'
+    );
+  }
+  if (source.indexOf(anchor, at + anchor.length) >= 0) {
+    throw new Error(
+      `[world/Surfaces] shader anchor is ambiguous in ${where}: ${JSON.stringify(anchor)} ` +
+        'matches more than once.'
+    );
+  }
+  return source.slice(0, at) + replacement + source.slice(at + anchor.length);
+}
+
+/**
+ * Anchor for the detail perturbation, inside three's own chunk body.
+ *
+ * `mapN` is declared and consumed entirely within `<normal_fragment_maps>`, so
+ * there is no point outside that chunk at which the perturbation can be added
+ * to it. The chunk is therefore resolved here, patched, and substituted for its
+ * own `#include`.
+ */
+const NORMAL_SCALE_ANCHOR = 'mapN.xy *= normalScale;';
+
+/**
+ * Three's tangent-space normal chunk with the detail perturbation folded in.
+ *
+ * Read from `THREE.ShaderChunk` on every compile rather than copied into this
+ * file. That is the whole reason this route was chosen over anchoring on
+ * `#include <normal_fragment_maps>` and adjusting the finished `normal`
+ * afterwards:
+ *
+ *  - A post-hoc adjustment needs `tbn`, which three only declares under
+ *    `#ifdef USE_NORMALMAP_TANGENTSPACE`. Guarding on that macro reintroduces
+ *    exactly the failure being fixed — if three renames it, the `#ifdef` goes
+ *    quietly false and the perturbation dies again with no diagnostic. Folding
+ *    into the chunk needs no macro of our own: the addend sits inside three's
+ *    tangent-space branch and is compiled under precisely the condition that
+ *    makes `mapN` exist.
+ *  - Taking the body live means a chunk rewrite is picked up rather than
+ *    shadowed by a stale copy, and any global chunk patch another module
+ *    installed is honoured. The one thing an upgrade can break — the anchor
+ *    line itself — throws.
+ *  - It is also exact. Adding to `mapN` before `normalize( tbn * mapN )` is
+ *    what the profiles were authored against; perturbing the normalised result
+ *    would rescale the effect by whatever `normalScale` did to the map's length.
+ *
+ * The chunk contains no nested includes today, and would be fine if it did:
+ * `resolveIncludes` runs over the finished string later regardless.
+ */
+function perturbedNormalChunk(): string {
+  const chunks = THREE.ShaderChunk as unknown as Record<string, string>;
+  return injectShader(
+    chunks.normal_fragment_maps!,
+    NORMAL_SCALE_ANCHOR,
+    `${NORMAL_SCALE_ANCHOR}\n\t${FRAGMENT_NORMAL}`,
+    'three ShaderChunk.normal_fragment_maps'
+  );
+}
+
+/**
  * Partial compensation for the layer's one-sided terms.
  *
  * Stain and cavity only ever darken, so a heavy setting pulls a whole surface
@@ -213,36 +293,90 @@ export function decorateSurface(
   defines.SURF_LAYER = '';
   if (profile.microScale > 0) defines.SURF_MICRO = '';
   if (profile.streak > 0) defines.SURF_STREAKS = '';
-  const perturbs = profile.normalMacro > 0 || profile.normalMicro > 0;
+  // The perturbation is folded into three's tangent-space branch, which only
+  // compiles when a tangent-space normal map is bound. A profile that asks for
+  // relief on a material with no normal map would therefore produce nothing,
+  // which is the same silent failure in a different disguise.
+  //
+  // Reported rather than thrown, unlike a missing shader anchor: this one can
+  // be provoked by an asset that failed to load, and taking the whole level
+  // down because a texture 404'd would be a worse outcome than a flat surface.
+  // The capture harness reports console errors alongside every shot, so it is
+  // still caught by the loop rather than only by someone reading a log.
+  const tangentSpaceNormals =
+    material.normalMap !== null && material.normalMapType === THREE.TangentSpaceNormalMap;
+  const perturbs =
+    (profile.normalMacro > 0 || profile.normalMicro > 0) && tangentSpaceNormals;
+  if (!perturbs && (profile.normalMacro > 0 || profile.normalMicro > 0)) {
+    console.error(
+      `[world/Surfaces] ${material.name || 'material'} has a normal perturbation ` +
+        'profile but no tangent-space normalMap, so the perturbation was dropped. ' +
+        'Bind a normal map, or set normalMacro and normalMicro to 0.'
+    );
+  }
 
   const previous = material.onBeforeCompile;
   material.onBeforeCompile = function (shader, renderer): void {
     previous.call(this, shader, renderer);
     Object.assign(shader.uniforms, uniforms);
 
-    shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', `${VERTEX_DECLARATIONS}\n#include <common>`)
-      .replace('#include <beginnormal_vertex>', `#include <beginnormal_vertex>\n${VERTEX_NORMAL}`)
-      .replace('#include <project_vertex>', `#include <project_vertex>\n${VERTEX_POSITION}`);
+    const vertex = 'vertex shader';
+    let source = shader.vertexShader;
+    source = injectShader(
+      source,
+      '#include <common>',
+      `${VERTEX_DECLARATIONS}\n#include <common>`,
+      vertex
+    );
+    source = injectShader(
+      source,
+      '#include <beginnormal_vertex>',
+      `#include <beginnormal_vertex>\n${VERTEX_NORMAL}`,
+      vertex
+    );
+    source = injectShader(
+      source,
+      '#include <project_vertex>',
+      `#include <project_vertex>\n${VERTEX_POSITION}`,
+      vertex
+    );
+    shader.vertexShader = source;
 
-    shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `${FRAGMENT_DECLARATIONS}\n#include <common>`)
-      .replace(
-        '#include <map_fragment>',
-        `${FRAGMENT_SAMPLE}\n#include <map_fragment>\n${FRAGMENT_ALBEDO}`
-      )
-      .replace(
-        '#include <roughnessmap_fragment>',
-        `#include <roughnessmap_fragment>\n${FRAGMENT_ROUGHNESS}`
-      )
-      .replace('#include <aomap_fragment>', `#include <aomap_fragment>\n${FRAGMENT_OCCLUSION}`);
-
+    const fragment = 'fragment shader';
+    source = shader.fragmentShader;
+    source = injectShader(
+      source,
+      '#include <common>',
+      `${FRAGMENT_DECLARATIONS}\n#include <common>`,
+      fragment
+    );
+    source = injectShader(
+      source,
+      '#include <map_fragment>',
+      `${FRAGMENT_SAMPLE}\n#include <map_fragment>\n${FRAGMENT_ALBEDO}`,
+      fragment
+    );
+    source = injectShader(
+      source,
+      '#include <roughnessmap_fragment>',
+      `#include <roughnessmap_fragment>\n${FRAGMENT_ROUGHNESS}`,
+      fragment
+    );
+    source = injectShader(
+      source,
+      '#include <aomap_fragment>',
+      `#include <aomap_fragment>\n${FRAGMENT_OCCLUSION}`,
+      fragment
+    );
     if (perturbs) {
-      shader.fragmentShader = shader.fragmentShader.replace(
-        'mapN.xy *= normalScale;',
-        `mapN.xy *= normalScale;\n\t${FRAGMENT_NORMAL}`
+      source = injectShader(
+        source,
+        '#include <normal_fragment_maps>',
+        perturbedNormalChunk(),
+        fragment
       );
     }
+    shader.fragmentShader = source;
   };
 
   const key = `surf:${cacheKeySeed++}`;
@@ -401,6 +535,13 @@ const FRAGMENT_ROUGHNESS = /* glsl */ `
 	);
 `;
 
+/**
+ * Added to the tangent-space map normal after `normalScale`, so the detail
+ * amount in a profile is absolute rather than scaled by the base map's own
+ * strength. `surfDetailNormal` comes from `FRAGMENT_SAMPLE`, which is injected
+ * at `<map_fragment>` — earlier in the shader than `<normal_fragment_maps>`, so
+ * it is in scope here.
+ */
 const FRAGMENT_NORMAL = /* glsl */ `mapN.xy += surfDetailNormal;`;
 
 // The junction's share of this is kept modest. It is a metre-tall gradient of
