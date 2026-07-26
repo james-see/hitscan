@@ -86,6 +86,34 @@ fixes and sat on a noise floor that no longer exists. Single-image and
 large-effect measurements are unaffected: texel density, paver occlusion,
 absolute luminance. Small-delta A/B results are not.
 
+## Gameplay
+
+### There is no way to resupply ammunition
+
+Found by playing: the player runs dry around the five-minute mark of a
+ten-minute round and stays dry, because nothing in the game restores ammunition.
+`#reserve` is set once at equip and refilled only on `game:restart`.
+
+The economy cannot support the win condition. The carbine carries 30 + 210 = 240
+rounds. At 26 damage it needs four hits inside 28m and five past 55m, so the
+score limit of 30 kills allows an eight-round budget per kill — roughly 50–60%
+accuracy sustained on a 700rpm automatic, with nothing left over for suppression
+or missed engagements. A player who empties the reserve has no melee and no
+sidearm, so the remainder of the round is unplayable.
+
+Three options, not exclusive:
+
+1. **Pickups from kills.** Bots drop a magazine on death. Ties resupply to
+   performance and needs no arena authoring, but compounds a losing streak.
+2. **Static crates.** Placed resupply at a handful of authored positions, on a
+   cooldown. Creates map control and rotation pressure, which is the more
+   interesting design, and the arena already has crate props to reuse.
+3. **Refill on respawn.** The cheapest fix and the usual arena-shooter default.
+   Worth doing regardless, since dying currently costs the round.
+
+Whichever lands, the round should be winnable: pick the resupply rate from the
+kill budget above rather than by feel, and confirm it in the drive.
+
 ## Fidelity
 
 ### Reconcile lighting against the photometric anchor
